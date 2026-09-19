@@ -5,6 +5,9 @@
   "description": "Ultra-fast OSRM approximation service for Greater Manchester (.NET 10 + ONNX)",
   "scripts": {
     "data": "cd python && uv run generate_grid.py && uv run fetch_osrm_matrix.py",
+    "data:offnetwork": "cd python && uv run gen_offnetwork.py",
+    "density": "cd python && uv run --with osmium build_road_density.py",
+    "experiments": "cd python && uv run experiments.py --train-rows 2000000 --test-per-bucket 4000",
     "grid": "cd python && uv run generate_grid.py",
     "matrix": "cd python && uv run fetch_osrm_matrix.py",
     "train": "cd python && uv run train_export_onnx.py",
@@ -16,7 +19,7 @@
     "test": "dotnet test tests/RoutingService.Tests.csproj -c Release",
     "bench": "cd python && uv run python ../tests/benchmark.py",
     "stats": "uv run tests/osrm_vs_onnx.py",
-    "stats:stratified": "uv run tests/osrm_vs_onnx.py --stratify",
-    "stats:on-network": "uv run tests/osrm_vs_onnx.py --on-network-only"
+    "stats:stratified": "uv run tests/osrm_vs_onnx.py --stratify --md tests/OSRM_VS_ONNX_STRATIFIED.md --out tests/osrm_vs_onnx_stratified.json",
+    "stats:on-network": "uv run tests/osrm_vs_onnx.py --on-network-only --md tests/OSRM_VS_ONNX_ON_NETWORK.md --out tests/osrm_vs_onnx_on_network.json"
   }
 }

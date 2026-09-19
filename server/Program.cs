@@ -148,6 +148,9 @@ internal sealed class RoutePredictor : IDisposable
             IntraOpNumThreads = 1,
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            // E8: TreeEnsemble inference does no per-request allocation the arena
+            // can recycle, so the arena only inflates steady-state RSS.
+            EnableCpuMemArena = false,
         };
         _session = new InferenceSession(modelPath, options);
         _outputNames = _session.OutputMetadata.Keys.ToArray();

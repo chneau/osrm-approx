@@ -1,61 +1,61 @@
 {
-  "generated_at": "2026-09-19T19:48:22.158010+00:00",
+  "generated_at": "2026-09-19T20:51:12.493558+00:00",
   "service_url": "http://localhost:5080",
   "osrm_url": "http://localhost:5001",
   "latency_us": {
     "n": 2000,
-    "mean_us": 908.5844615,
-    "p50_us": 864.3340000000001,
-    "p90_us": 1080.1772000000003,
-    "p99_us": 1727.9564799999998,
-    "p999_us": 2913.3687850000224,
-    "max_us": 3115.604,
-    "throughput_rps": 1100.6131431623653
+    "mean_us": 1292.8358755000002,
+    "p50_us": 1200.8465,
+    "p90_us": 1597.7002000000002,
+    "p99_us": 3157.2956099999988,
+    "p999_us": 4076.0733630000364,
+    "max_us": 5584.83,
+    "throughput_rps": 773.4933868641704
   },
   "server_latency_us": {
     "n": 2000,
-    "mean_us": 112.8695,
-    "p50_us": 104.0,
-    "p90_us": 154.0,
-    "p99_us": 240.01999999999998,
-    "p999_us": 598.093000000019,
-    "max_us": 964.0,
-    "throughput_rps": 8859.789402805894
+    "mean_us": 324.428,
+    "p50_us": 296.0,
+    "p90_us": 466.0,
+    "p99_us": 842.1099999999999,
+    "p999_us": 1878.044000000009,
+    "max_us": 4460.0,
+    "throughput_rps": 3082.3480094196557
   },
   "concurrency": {
     "threads": 8,
-    "rps": 46380.3,
+    "rps": 43499.38,
     "wrk": {
-      "rps": 46380.3,
-      "p99_us": 4310.0,
+      "rps": 43499.38,
+      "p99_us": 3930.0,
       "threads": 8,
       "connections": 64
     }
   },
   "memory": {
-    "rss_before_mb": 162.21875,
-    "rss_after_mb": 165.15625
+    "rss_before_mb": 393.953125,
+    "rss_after_mb": 429.69140625
   },
   "accuracy": {
     "duration": {
       "n": 600,
-      "mae": 196.00166666666667,
-      "medae": 114.64999999999995,
-      "p90_abs_err": 473.09000000000003,
-      "medape_pct": 6.627980727771105,
-      "p90_ape_pct": 31.050092755149212,
-      "within_10pct": 63.83333333333333,
-      "within_25pct": 86.83333333333333
+      "mae": 134.4975,
+      "medae": 87.40000000000009,
+      "p90_abs_err": 275.5599999999999,
+      "medape_pct": 4.852997686815362,
+      "p90_ape_pct": 19.09980456162114,
+      "within_10pct": 78.33333333333333,
+      "within_25pct": 93.5
     },
     "distance": {
       "n": 600,
-      "mae": 3081.399333333333,
-      "medae": 1833.800000000001,
-      "p90_abs_err": 7301.880000000005,
-      "medape_pct": 6.664021766899518,
-      "p90_ape_pct": 30.264755236764017,
-      "within_10pct": 63.66666666666667,
-      "within_25pct": 87.5
+      "mae": 1788.8988333333334,
+      "medae": 1185.3500000000004,
+      "p90_abs_err": 3544.4000000000015,
+      "medape_pct": 4.111811730003243,
+      "p90_ape_pct": 16.04603426736859,
+      "within_10pct": 77.33333333333333,
+      "within_25pct": 95.0
     }
   },
   "routes": [
@@ -71,8 +71,8 @@
       ],
       "osrm_distance_m": 2286.1,
       "osrm_duration_s": 353.7,
-      "approx_distance_m": 2169.8,
-      "approx_duration_s": 289.7
+      "approx_distance_m": 2209.0,
+      "approx_duration_s": 301.5
     },
     {
       "name": "city-centre-to-old-trafford",
@@ -86,8 +86,8 @@
       ],
       "osrm_distance_m": 6100.2,
       "osrm_duration_s": 753.9,
-      "approx_distance_m": 5044.1,
-      "approx_duration_s": 541.8
+      "approx_distance_m": 4992.1,
+      "approx_duration_s": 529.7
     },
     {
       "name": "city-centre-to-manchester-airport",
@@ -101,8 +101,8 @@
       ],
       "osrm_distance_m": 20607.6,
       "osrm_duration_s": 2451.6,
-      "approx_distance_m": 19243.8,
-      "approx_duration_s": 1412.8
+      "approx_distance_m": 18643.7,
+      "approx_duration_s": 1407.5
     },
     {
       "name": "etihad-to-trafford-park",
@@ -116,8 +116,8 @@
       ],
       "osrm_distance_m": 7531.8,
       "osrm_duration_s": 817.6,
-      "approx_distance_m": 7788.1,
-      "approx_duration_s": 845.5
+      "approx_distance_m": 7754.6,
+      "approx_duration_s": 845.4
     },
     {
       "name": "didsbury-to-salford-quays",
@@ -131,8 +131,8 @@
       ],
       "osrm_distance_m": 9681.8,
       "osrm_duration_s": 1040.3,
-      "approx_distance_m": 10911.6,
-      "approx_duration_s": 1022.6
+      "approx_distance_m": 10743.3,
+      "approx_duration_s": 1030.6
     },
     {
       "name": "stockport-to-bolton",
@@ -146,8 +146,8 @@
       ],
       "osrm_distance_m": 34971.1,
       "osrm_duration_s": 1752.7,
-      "approx_distance_m": 36974.8,
-      "approx_duration_s": 1779.9
+      "approx_distance_m": 36626.7,
+      "approx_duration_s": 1698.4
     },
     {
       "name": "wigan-to-rochdale",
@@ -161,8 +161,8 @@
       ],
       "osrm_distance_m": 41070.1,
       "osrm_duration_s": 2208.1,
-      "approx_distance_m": 41986.5,
-      "approx_duration_s": 2278.8
+      "approx_distance_m": 42532.1,
+      "approx_duration_s": 2264.0
     },
     {
       "name": "bury-to-oldham",
@@ -176,8 +176,8 @@
       ],
       "osrm_distance_m": 20550.3,
       "osrm_duration_s": 1285.8,
-      "approx_distance_m": 19545.3,
-      "approx_duration_s": 1140.0
+      "approx_distance_m": 19794.1,
+      "approx_duration_s": 1214.6
     },
     {
       "name": "altrincham-to-ashton",
@@ -191,8 +191,8 @@
       ],
       "osrm_distance_m": 26671.9,
       "osrm_duration_s": 1647.4,
-      "approx_distance_m": 29092.3,
-      "approx_duration_s": 1722.0
+      "approx_distance_m": 28149.5,
+      "approx_duration_s": 1690.3
     },
     {
       "name": "chorlton-to-prestwich",
@@ -206,8 +206,8 @@
       ],
       "osrm_distance_m": 22130.2,
       "osrm_duration_s": 1175.7,
-      "approx_distance_m": 18291.2,
-      "approx_duration_s": 1229.9
+      "approx_distance_m": 17841.0,
+      "approx_duration_s": 1199.4
     },
     {
       "name": "city-centre-to-bury",
@@ -221,8 +221,8 @@
       ],
       "osrm_distance_m": 16819.0,
       "osrm_duration_s": 1369.4,
-      "approx_distance_m": 17390.3,
-      "approx_duration_s": 1311.3
+      "approx_distance_m": 16673.3,
+      "approx_duration_s": 1402.5
     },
     {
       "name": "sale-to-middleton",
@@ -236,8 +236,8 @@
       ],
       "osrm_distance_m": 29283.6,
       "osrm_duration_s": 1473.3,
-      "approx_distance_m": 29634.6,
-      "approx_duration_s": 1490.8
+      "approx_distance_m": 29073.4,
+      "approx_duration_s": 1494.0
     }
   ]
 }

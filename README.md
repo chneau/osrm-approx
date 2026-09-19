@@ -26,9 +26,10 @@ multi-resolution grid (3000 pts)                  ONNX TreeEnsemble (1 pass)
         │                                                └── duration_s
         ▼                                                        │
 OSRM /table (chunked) ──► samples.parquet                        ▼
-        │                                         {"duration_s":..,"distance_m":..}
+   + random off-network coords ──► offnetwork.parquet  {"duration_s":..,"distance_m":..}
+        │
         ▼
-LightGBM ×2 ──► model.onnx
+LightGBM ×2  (E1 weights, 511 leaves) ──► model.onnx
 ```
 
 Feature vector (order is a hard contract between `python/train_export_onnx.py` and
@@ -48,7 +49,15 @@ Feature vector (order is a hard contract between `python/train_export_onnx.py` a
 Two LightGBM regressors (distance and duration) are flattened into `ai.onnx.ml`
 `TreeEnsembleRegressor` nodes and share one graph, so serving is a single inference call.
 LightGBM's boost-from-average initial score is measured empirically and baked in as each
-node's `base_values`.
+node's `base_values`. Split thresholds are rounded **down** to the largest `float32 ≤
+threshold`, which makes the ONNX comparison exactly equivalent to LightGBM's `float64`
+comparison (round-to-nearest could send an input down the wrong branch otherwise — see
+`IMPROVEMENTS.md`).
+
+The model is trained on all-pairs grid samples **plus** random off-network coordinates
+(the service is handed raw coordinates, so it must learn how OSRM snaps them), with
+inverse-frequency sample weights so short trips are not drowned out by long ones. See
+`IMPROVEMENTS.md` for the full experiment log (E1–E9) behind that choice.
 
 ---
 
@@ -67,6 +76,7 @@ npm run osrm:init
 # 2. M1 — start OSRM and generate the ground-truth sample set
 npm run osrm:up
 npm run data            # grid + chunked /table -> data/processed/samples.parquet
+npm run data:offnetwork # random raw coords -> data/processed/offnetwork.parquet (E5)
 
 # 3. M2 — train LightGBM and export server/models/model.onnx
 npm run train
@@ -90,7 +100,7 @@ npm run osrm:down
 
 ```bash
 curl "http://localhost:5080/route?orig=53.4808,-2.2426&dest=53.3537,-2.2749"
-# {"duration_s":1412.8,"distance_m":19243.8}
+# {"duration_s":1407.5,"distance_m":18643.7}
 ```
 
 `GET /health` reports the loaded model and the feature contract. Every response carries a
@@ -104,18 +114,23 @@ the HTTP client's own overhead dominating the number.
 ```
 ├── docker-compose.yml              # OSRM MLD build + serving (offline generation only)
 ├── package.json                    # runner scripts
+├── IMPROVEMENTS.md                 # model-improvement log (E1–E9), good and bad results
 ├── data/
 │   ├── raw/                        # greater-manchester.osm.pbf, .osrm* artefacts
-│   └── processed/                  # grid.parquet, samples.parquet
+│   └── processed/                  # grid.parquet, samples.parquet, offnetwork.parquet
 ├── python/                         # uv-managed project
 │   ├── generate_grid.py            # multi-resolution grid
 │   ├── fetch_osrm_matrix.py        # snap filter + chunked OSRM /table caller
-│   └── train_export_onnx.py        # LightGBM training, ONNX export, verification
+│   ├── gen_offnetwork.py           # random raw coords -> OSRM-snapped labels (E5)
+│   ├── build_road_density.py       # OSM road-density raster via pyosmium (E4)
+│   ├── train_export_onnx.py        # LightGBM training, ONNX export, verification
+│   ├── experiments.py              # balanced-eval experiment harness (E1–E4/E6/E7/E9)
+│   └── experiment_e5.py            # off-network training experiment (E5)
 ├── server/                         # .NET 10 minimal API
 │   ├── RoutingService.csproj
 │   ├── Program.cs
 │   └── models/
-│       ├── model.onnx              # baked LightGBM ensemble
+│       ├── model.onnx              # baked LightGBM ensemble (511 leaves, ONNX-verified)
 │       └── model_metadata.json     # feature/target contract + held-out metrics
 └── tests/
     ├── benchmark.py                # latency / RSS / accuracy + golden fixtures
@@ -138,17 +153,18 @@ reproducibility and the accuracy budgets, so these are regression-gated rather t
 
 ### Accuracy (training, held-out)
 
-4,850,998 pairs (2,203 routable grid points); 10% held out.
+5,009,804 pairs (2,203 routable grid points + off-network samples); 10% held out.
 
 | target | MAE | MedAE | MedAPE | RMSE |
 |--------|-----|-------|--------|------|
-| `distance_m` | 1,280.1 | 923.7 | 5.9% | 1,808.1 |
-| `duration_s` | 61.8 | 49.9 | 4.0% | 80.1 |
+| `distance_m` | 788.4 | 525.3 | 3.3% | 1,202.7 |
+| `duration_s` | 36.5 | 29.1 | 2.3% | 48.9 |
 
-A haversine-as-distance baseline scores 29.2% MedAPE, so the model is a large improvement over
-geometry alone. Error is smallest on long trips and largest at short range, where OSRM follows
-the road network rather than the straight line (`distance_m` MedAPE: 30.7% under 1 km → 2.1%
-over 25 km).
+The ONNX graph reproduces the LightGBM boosters to **100.0000%** on the held-out set
+(max |Δ| = 0.03 m / 0.002 s). A haversine-as-distance baseline scores 29.1% MedAPE, so the
+model is a large improvement over geometry alone. Error is smallest on long trips and largest
+at short range, where OSRM follows the road network rather than the straight line
+(`distance_m` MedAPE: 20.0% under 1 km → 1.2% over 25 km).
 
 ### Accuracy (served model vs **live** OSRM)
 
@@ -156,8 +172,8 @@ over 25 km).
 
 | target | MedAE | MedAPE | p90 APE | within 10% |
 |--------|-------|--------|---------|------------|
-| `duration_s` | 114.6 | 6.6% | 31.1% | 64% |
-| `distance_m` | 1,833.8 | 6.7% | 30.3% | 64% |
+| `duration_s` | 87.4 | 4.9% | 19.1% | 78% |
+| `distance_m` | 1,185.4 | 4.1% | 16.0% | 77% |
 
 ### Accuracy statistics and the distance caveat
 
@@ -168,36 +184,43 @@ correlation, an OLS fit, bootstrap 95% CIs, and a breakdown by trip distance. Re
 `tests/OSRM_VS_ONNX.md` / `.json`.
 
 **Uniform random sampling is misleading, and this is the important finding.** Averaging over the
-whole bbox (N=4,987) gives an encouraging MedAPE of 6.8% (duration) / 6.4% (distance) — but that
+whole bbox (N=5,000) gives an encouraging MedAPE of 5.0% (duration) / 4.3% (distance) — but that
 number is dominated by long trips, because uniform sampling over a ~0.3°×0.77° box almost never
-produces short ones. Sampling *evenly across separation bands* (`--stratify`, N=4,682) tells the
-real story: MedAPE 12.7% / 14.2%, and a mean (MAPE) that blows up to ~130% because short trips
+produces short ones. Sampling *evenly across separation bands* (`--stratify`, N=4,400) tells the
+real story: MedAPE 9.9% / 10.3%, and a mean (MAPE) that blows up to 74% / 68% because short trips
 have enormous *relative* error. Broken down by OSRM distance:
 
 | OSRM distance | n | duration MedAPE | distance MedAPE | distance bias |
 |---|---|---|---|---|
-| < 1 km | 324 | 176.5% | 216.9% | +1,962 m |
-| 1–3 km | 719 | 34.5% | 38.5% | +1,319 m |
-| 3–10 km | 1,154 | 20.4% | 21.0% | +386 m |
-| 10–25 km | 962 | 9.9% | 11.4% | +550 m |
-| > 25 km | 1,523 | 5.6% | 5.0% | +213 m |
+| < 1 km | 299 | 78.0% | 74.4% | +650 m |
+| 1–3 km | 688 | 24.8% | 26.2% | +200 m |
+| 3–10 km | 1,064 | 17.5% | 21.0% | −400 m |
+| 10–25 km | 917 | 7.9% | 8.7% | −314 m |
+| > 25 km | 1,432 | 4.2% | 3.5% | −493 m |
 
-So accuracy is **strongly distance-dependent**: excellent (≈5%) above 25 km, weak (tens of
-percent) below ~3 km, and a systematic *over*-prediction (positive bias) at short range — the
-model has an implicit floor of roughly 1 km and cannot represent a sub-kilometre road trip. This
-is inherent to a smooth coordinate function and is the honest limitation to plan around. If
-short-trip fidelity matters, the fix is a denser core grid (100–250 m) or a separate short-range
-model, not more trees on the current features.
+So accuracy is **strongly distance-dependent**: excellent (~4%) above 25 km, weak (tens of
+percent) below ~3 km. This is inherent to a smooth coordinate function — a sub-kilometre trip is
+a few road hops, and random raw coordinates often *snap* hundreds of metres before routing even
+begins.
+
+These numbers are already the *improved* model. `IMPROVEMENTS.md` documents the whole path: the
+original 63-leaf model had a band-balanced MedAPE of 12.7% / 14.2% and a `< 1 km` bucket of
+**216.9%**; inverse-frequency training weights (E1) removed the implicit ~1 km floor and
+off-network training pairs (E5) roughly halved the error on the raw coordinates the API actually
+receives. What remains is largely the snapping floor, not a modelling gap — the fix there is a
+denser core grid (100–250 m), not more trees.
 
 ### Latency
 
 | measurement | p50 | p90 | p99 | p99.9 |
 |-------------|-----|-----|-----|-------|
-| server-side (`Server-Timing`) | 104 µs | 154 µs | **240 µs** | 598 µs |
-| client round-trip (localhost) | 864 µs | 1,080 µs | 1,728 µs | 2,913 µs |
+| server-side (`Server-Timing`) | 296 µs | 466 µs | **842 µs** | 1,878 µs |
+| client round-trip (localhost) | 1,201 µs | 1,598 µs | 3,157 µs | 4,076 µs |
 
-The plan's **p99 < 1 ms** target is met on server-side processing time with roughly 4× headroom.
-Client round-trip is higher only because it includes Python `requests` + loopback HTTP overhead.
+The plan's **p99 < 1 ms** target is still met on server-side processing time, but the 511-leaf
+model spends ~3.5× more per inference than the original 63-leaf one (p99 240 µs → 842 µs), so the
+headroom is now ~1.2× rather than ~4×. Client round-trip is higher only because it includes
+Python `requests` + loopback HTTP overhead.
 
 ### Throughput — head-to-head vs OSRM
 
@@ -207,36 +230,40 @@ Identical load profile (`wrk -t8 -c64 -d15s`) run against the approximation serv
 
 | metric | OSRM (`osrm-routed`) | Approx service |
 |--------|----------------------|----------------|
-| requests/sec | 14,116 | **44,545** |
-| p50 | 3.97 ms | 1.26 ms |
-| p90 | 7.17 ms | 2.35 ms |
-| p99 | 10.72 ms | **4.47 ms** |
-| avg latency | 4.60 ms | 1.46 ms |
-| requests served (15 s) | 212,321 | 670,567 |
+| requests/sec | 13,053 | **43,532** |
+| p50 | 4.34 ms | 1.32 ms |
+| p90 | 7.66 ms | 2.26 ms |
+| p99 | 11.06 ms | **4.21 ms** |
+| avg latency | 4.91 ms | 1.48 ms |
+| requests served (15 s) | 196,711 | 655,220 |
 | response size | 591 B | 40 B |
-| socket read errors | 386 | 0 |
+| socket read errors | 350 | 0 |
 
-That is roughly **3× the throughput and ~2.4× lower p99**, with no dropped connections where OSRM
-recorded 386. Two honest caveats: this is a *single repeated route* (steady-state single-route
+That is roughly **3.3× the throughput and ~2.6× lower p99**, with no dropped connections where OSRM
+recorded 350. Two honest caveats: this is a *single repeated route* (steady-state single-route
 throughput, not a distribution over the map — OSRM does not cache, so it is still a fair
 direction), and OSRM's larger JSON payload accounts for part of its latency. OSRM remains exact
-ground truth; the approximation buys speed and a far lighter deployment at ~6.6%/6.7% MedAPE.
-
-*(An earlier run of the service alone reported 46,380 req/s; the number above is from the
-same-moment head-to-head and is the one to quote.)*
+ground truth; the approximation buys speed and a far lighter deployment at ~4.9%/4.1% MedAPE on
+random pairs.
 
 ### Memory — **target not met**
 
-Resident set size after warm-up is **~162 MB** (Δ ≈ +3 MB under load), against the plan's
+Resident set size after warm-up is **~395 MB** (≈ +36 MB under sustained load), against the plan's
 **< 30 MB** target. This is not a code leak: the floor is the .NET/ASP.NET Core runtime plus the
-native ONNX Runtime shared library, both of which the design depends on. A
+native ONNX Runtime shared library, and the flattened tree table of the shipped model. A
 `Process`-per-request or interpreter-free design would be required to approach single-digit MB;
 that trade-off was out of scope. The serving *compute* target (p99 < 1 ms, no graph traversal) is
 met, the *footprint* target is not.
 
+The 511-leaf model is a real part of that footprint and the dominant reason it grew: loading the
+old 63-leaf `model.onnx` (3.8 MB) into the same server gives **~138 MB RSS**, the 511-leaf one
+(32.4 MB) gives **~400 MB**. The ONNX CPU memory arena accounts for ~1 MB of that difference
+(measured, see `IMPROVEMENTS.md` E8) — it is the larger tree node table, not the arena. It is a
+deliberate accuracy-for-memory trade.
+
 For reference, the live `osrm-routed` container held **~394 MB RSS** on top of a 250 MB on-disk
-MLD graph — so the approximation still wins on footprint, just not against the plan's original
-single-digit-MB ambition.
+MLD graph — so the approximation is now roughly *level* with OSRM on footprint, and still wins on
+deployment size (no 250 MB graph to ship).
 
 ---
 
@@ -262,3 +289,13 @@ routing behaviour — a river with few crossings, one-way systems, turn restrict
 error grows where the road network is not locally uniform. Medium-range trips across the
 city, where the network offers several distinct corridors, are the hardest case. Accuracy
 numbers are reported honestly in the benchmark output.
+
+Sub-kilometre trips from *raw* coordinates are the weakest point, and largely for a reason no
+coordinate model can fix: a random point hundreds of metres from a road is first snapped onto
+the network, and that snap distance is a large fraction of a short trip. Training on
+off-network pairs (`IMPROVEMENTS.md` E5) halved the error there but cannot remove it.
+
+`IMPROVEMENTS.md` is the honest record of what worked and what did not: two adopted changes
+(inverse-frequency weights, off-network data) plus a capacity bump, and four measured
+rejections (log/normalised targets, sin/cos bearing, road-density features, short-range
+specialist), with the RSS/size cost of the adopted configuration stated rather than hidden.
