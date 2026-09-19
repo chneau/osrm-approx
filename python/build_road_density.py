@@ -1,4 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "numpy>=1.26",
+#   "osmium>=3.7",
+# ]
+# ///
 """E4 (see IMPROVEMENTS.md): static road-density raster from the OSM extract.
 
 Coordinates alone cannot tell an urban corridor from open countryside. This

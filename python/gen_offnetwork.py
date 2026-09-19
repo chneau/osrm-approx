@@ -1,4 +1,13 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "numpy>=1.26",
+#   "pandas>=2.2",
+#   "pyarrow>=17.0",
+#   "requests>=2.32",
+# ]
+# ///
 """E5 (see IMPROVEMENTS.md): ground-truth pairs for *off-network* coordinates.
 
 The shipped grid only contains points that sit on the road network. The service,

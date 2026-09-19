@@ -1,4 +1,13 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "numpy>=1.26",
+#   "pandas>=2.2",
+#   "pyarrow>=17.0",
+#   "requests>=2.32",
+# ]
+# ///
 """Chunked OSRM /table caller -> ground-truth static (duration_s, distance_m).
 
 Reads the multi-resolution grid produced by ``generate_grid.py``, queries a

@@ -35,9 +35,7 @@ testing-ml-tte/
 ├── data/
 │   ├── raw/                        # greater-manchester.osm.pbf
 │   └── processed/                  # samples.parquet (coords, distance, duration)
-├── python/                         # uv-managed project
-│   ├── pyproject.toml              # project metadata & dependencies (uv add lightgbm, etc.)
-│   ├── uv.lock                     # reproducible lockfile
+├── python/                         # self-contained uv scripts (PEP 723 inline metadata)
 │   ├── generate_grid.py            # multi-resolution grid generator
 │   ├── fetch_osrm_matrix.py        # chunked OSRM /table caller
 │   └── train_export_onnx.py        # LightGBM training & ONNX export

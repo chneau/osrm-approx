@@ -1,4 +1,15 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "lightgbm>=4.5",
+#   "numpy>=1.26",
+#   "onnx>=1.16",
+#   "onnxruntime>=1.19",
+#   "pandas>=2.2",
+#   "pyarrow>=17.0",
+# ]
+# ///
 """Train LightGBM regressors for OSRM distance/duration and export a single ONNX model.
 
 The exported graph is intentionally simple and dependency-free at runtime:

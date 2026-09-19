@@ -118,7 +118,7 @@ the HTTP client's own overhead dominating the number.
 ├── data/
 │   ├── raw/                        # greater-manchester.osm.pbf, .osrm* artefacts
 │   └── processed/                  # grid.parquet, samples.parquet, offnetwork.parquet
-├── python/                         # uv-managed project
+├── python/                         # self-contained uv scripts (PEP 723 inline metadata)
 │   ├── generate_grid.py            # multi-resolution grid
 │   ├── fetch_osrm_matrix.py        # snap filter + chunked OSRM /table caller
 │   ├── gen_offnetwork.py           # random raw coords -> OSRM-snapped labels (E5)
