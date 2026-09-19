@@ -162,12 +162,31 @@ over 25 km).
 The plan's **p99 < 1 ms** target is met on server-side processing time with roughly 4× headroom.
 Client round-trip is higher only because it includes Python `requests` + loopback HTTP overhead.
 
-### Throughput
+### Throughput — head-to-head vs OSRM
 
-`wrk -t8 -c64 -d15s`: **46,380 req/s**, p99 4.31 ms. The service sustains well above the
-sequential rate (≈1,100 req/s). At this offered load the measured p99 rises to ~4 ms; that
-figure includes client and connection-handling cost at 64 concurrent connections, so it is an
-upper bound on true per-request service latency rather than the server-side p99 above.
+Identical load profile (`wrk -t8 -c64 -d15s`) run against the approximation service and a live
+`osrm-routed`, on the same 16-vCPU box, back to back. The OSRM container had **no CPU limit**
+(unlimited cores, ~394 MB RSS, 250 MB MLD graph on disk), so this is a like-for-like comparison:
+
+| metric | OSRM (`osrm-routed`) | Approx service |
+|--------|----------------------|----------------|
+| requests/sec | 14,116 | **44,545** |
+| p50 | 3.97 ms | 1.26 ms |
+| p90 | 7.17 ms | 2.35 ms |
+| p99 | 10.72 ms | **4.47 ms** |
+| avg latency | 4.60 ms | 1.46 ms |
+| requests served (15 s) | 212,321 | 670,567 |
+| response size | 591 B | 40 B |
+| socket read errors | 386 | 0 |
+
+That is roughly **3× the throughput and ~2.4× lower p99**, with no dropped connections where OSRM
+recorded 386. Two honest caveats: this is a *single repeated route* (steady-state single-route
+throughput, not a distribution over the map — OSRM does not cache, so it is still a fair
+direction), and OSRM's larger JSON payload accounts for part of its latency. OSRM remains exact
+ground truth; the approximation buys speed and a far lighter deployment at ~6.6%/6.7% MedAPE.
+
+*(An earlier run of the service alone reported 46,380 req/s; the number above is from the
+same-moment head-to-head and is the one to quote.)*
 
 ### Memory — **target not met**
 
@@ -177,6 +196,10 @@ native ONNX Runtime shared library, both of which the design depends on. A
 `Process`-per-request or interpreter-free design would be required to approach single-digit MB;
 that trade-off was out of scope. The serving *compute* target (p99 < 1 ms, no graph traversal) is
 met, the *footprint* target is not.
+
+For reference, the live `osrm-routed` container held **~394 MB RSS** on top of a 250 MB on-disk
+MLD graph — so the approximation still wins on footprint, just not against the plan's original
+single-digit-MB ambition.
 
 ---
 
