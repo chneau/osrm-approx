@@ -8,6 +8,7 @@
 #   "onnxruntime>=1.19",
 #   "pandas>=2.2",
 #   "pyarrow>=17.0",
+#   "scikit-learn>=1.5",
 # ]
 # ///
 """Train LightGBM regressors for OSRM distance/duration and export a single ONNX model.
