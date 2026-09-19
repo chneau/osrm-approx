@@ -14,6 +14,9 @@
     "serve": "dotnet run --project server/RoutingService.csproj -c Release",
     "build": "dotnet build server/RoutingService.csproj -c Release",
     "test": "dotnet test tests/RoutingService.Tests.csproj -c Release",
-    "bench": "cd python && uv run python ../tests/benchmark.py"
+    "bench": "cd python && uv run python ../tests/benchmark.py",
+    "stats": "uv run tests/osrm_vs_onnx.py",
+    "stats:stratified": "uv run tests/osrm_vs_onnx.py --stratify",
+    "stats:on-network": "uv run tests/osrm_vs_onnx.py --on-network-only"
   }
 }

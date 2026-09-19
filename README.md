@@ -78,6 +78,10 @@ npm run serve           # listens on http://localhost:5080
 npm run bench           # also writes tests/golden_routes.json
 npm run test
 
+# 5b. Full accuracy statistics vs live OSRM (standalone uv script)
+npm run stats           # writes tests/OSRM_VS_ONNX.md + .json
+npm run stats:stratified
+
 # 6. Decommission OSRM
 npm run osrm:down
 ```
@@ -115,6 +119,9 @@ the HTTP client's own overhead dominating the number.
 │       └── model_metadata.json     # feature/target contract + held-out metrics
 └── tests/
     ├── benchmark.py                # latency / RSS / accuracy + golden fixtures
+    ├── osrm_vs_onnx.py             # standalone uv script: full accuracy statistics
+    ├── OSRM_VS_ONNX.md             # generated statistics report (uniform sampling)
+    ├── OSRM_VS_ONNX_STRATIFIED.md  # generated statistics report (band-balanced)
     ├── golden_routes.json          # checked-in benchmark output (test fixture)
     ├── RoutingService.Tests.csproj
     └── GoldenRoutesTests.cs
@@ -151,6 +158,36 @@ over 25 km).
 |--------|-------|--------|---------|------------|
 | `duration_s` | 114.6 | 6.6% | 31.1% | 64% |
 | `distance_m` | 1,833.8 | 6.7% | 30.3% | 64% |
+
+### Accuracy statistics and the distance caveat
+
+`tests/osrm_vs_onnx.py` (a self-contained uv script — `./tests/osrm_vs_onnx.py --n 5000`, or
+`npm run stats`) does a fuller job: it samples random pairs, pulls exact ground truth from a live
+OSRM `/table` in chunks, and reports MAE/RMSE, signed bias, the APE percentile distribution,
+correlation, an OLS fit, bootstrap 95% CIs, and a breakdown by trip distance. Reports land in
+`tests/OSRM_VS_ONNX.md` / `.json`.
+
+**Uniform random sampling is misleading, and this is the important finding.** Averaging over the
+whole bbox (N=4,987) gives an encouraging MedAPE of 6.8% (duration) / 6.4% (distance) — but that
+number is dominated by long trips, because uniform sampling over a ~0.3°×0.77° box almost never
+produces short ones. Sampling *evenly across separation bands* (`--stratify`, N=4,682) tells the
+real story: MedAPE 12.7% / 14.2%, and a mean (MAPE) that blows up to ~130% because short trips
+have enormous *relative* error. Broken down by OSRM distance:
+
+| OSRM distance | n | duration MedAPE | distance MedAPE | distance bias |
+|---|---|---|---|---|
+| < 1 km | 324 | 176.5% | 216.9% | +1,962 m |
+| 1–3 km | 719 | 34.5% | 38.5% | +1,319 m |
+| 3–10 km | 1,154 | 20.4% | 21.0% | +386 m |
+| 10–25 km | 962 | 9.9% | 11.4% | +550 m |
+| > 25 km | 1,523 | 5.6% | 5.0% | +213 m |
+
+So accuracy is **strongly distance-dependent**: excellent (≈5%) above 25 km, weak (tens of
+percent) below ~3 km, and a systematic *over*-prediction (positive bias) at short range — the
+model has an implicit floor of roughly 1 km and cannot represent a sub-kilometre road trip. This
+is inherent to a smooth coordinate function and is the honest limitation to plan around. If
+short-trip fidelity matters, the fix is a denser core grid (100–250 m) or a separate short-range
+model, not more trees on the current features.
 
 ### Latency
 
