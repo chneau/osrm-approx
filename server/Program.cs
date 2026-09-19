@@ -1,24 +1,23 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Serialization;
-using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Predictable default; ASPNETCORE_URLS still wins if the operator sets it.
 builder.WebHost.UseUrls(Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://localhost:5080");
 
-// A single shared session serves every request; InferenceSession.Run is
+// A single shared model serves every request; Predict is read-only and
 // thread-safe, so no locking or pooling is needed at this scale.
 builder.Services.AddSingleton(_ =>
 {
     var modelPath = Environment.GetEnvironmentVariable("MODEL_PATH")
-                    ?? Path.Combine(AppContext.BaseDirectory, "models", "model.onnx");
+                    ?? Path.Combine(AppContext.BaseDirectory, "models", "model.bin");
     if (!File.Exists(modelPath))
     {
         throw new FileNotFoundException(
-            $"ONNX model not found at '{modelPath}'. Run `npm run train` or set MODEL_PATH.", modelPath);
+            $"Tree ensemble model not found at '{modelPath}'. Run `npm run train` " +
+            "and `uv run python/export_binary.py`, or set MODEL_PATH.", modelPath);
     }
     return new RoutePredictor(modelPath);
 });
@@ -132,28 +131,16 @@ internal static class RoutingFeatures
     }
 }
 
-internal sealed class RoutePredictor : IDisposable
+internal sealed class RoutePredictor
 {
-    private readonly InferenceSession _session;
-    private readonly string[] _outputNames;
+    private readonly TreeEnsembleModel _model;
     private readonly float[] _features = new float[RoutingFeatures.Count];
+    private readonly float[] _outputs = new float[2];
 
     public RoutePredictor(string modelPath)
     {
         ModelPath = modelPath;
-        var options = new Microsoft.ML.OnnxRuntime.SessionOptions
-        {
-            // Latency-tuned: one request is one tiny forward pass on a fixed input shape.
-            InterOpNumThreads = 1,
-            IntraOpNumThreads = 1,
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-            // E8: TreeEnsemble inference does no per-request allocation the arena
-            // can recycle, so the arena only inflates steady-state RSS.
-            EnableCpuMemArena = false,
-        };
-        _session = new InferenceSession(modelPath, options);
-        _outputNames = _session.OutputMetadata.Keys.ToArray();
+        _model = TreeEnsembleModel.Load(modelPath);
     }
 
     public string ModelPath { get; }
@@ -166,19 +153,8 @@ internal sealed class RoutePredictor : IDisposable
 
     public (double DurationS, double DistanceM) Predict(float[] features)
     {
-        var tensor = new DenseTensor<float>(features, [1, RoutingFeatures.Count]);
-        var inputs = new[] { NamedOnnxValue.CreateFromTensor("features", tensor) };
-
-        using var results = _session.Run(inputs, _outputNames);
-        double distance = 0, duration = 0;
-        foreach (var result in results)
-        {
-            double value = result.AsTensor<float>()[0];
-            if (result.Name == "distance_m") distance = value;
-            else if (result.Name == "duration_s") duration = value;
-        }
-        return (duration, distance);
+        // model.bin holds targets in graph order: index 0 = distance_m, 1 = duration_s.
+        _model.Predict(features, _outputs);
+        return (_outputs[1], _outputs[0]);
     }
-
-    public void Dispose() => _session.Dispose();
 }

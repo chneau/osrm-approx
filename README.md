@@ -4,8 +4,9 @@ An ultra-fast `A → B` lookup that returns static `(duration_s, distance_m)` mi
 car routing in Greater Manchester — without running OSRM at query time.
 
 OSRM is used **offline only** to generate ground truth. The runtime is a small .NET 10
-service that computes a handful of geometric features and runs a single ONNX inference
-pass. There is no graph traversal, no routing engine and no external dependency on the
+service that computes a handful of geometric features and evaluates two LightGBM tree
+ensembles with a dependency-free C# interpreter (no ONNX Runtime on the request path).
+There is no graph traversal, no routing engine and no external dependency on the
 request path.
 
 ---
@@ -21,7 +22,7 @@ Geofabrik .osm.pbf                                GET /route?orig=lat,lon&dest=l
 osrm-extract / partition / customize              haversine · bearing · deltas
         │                                                  │
         ▼                                                  ▼
-multi-resolution grid (3000 pts)                  ONNX TreeEnsemble (1 pass)
+multi-resolution grid (3000 pts)            compiled tree ensemble (1 pass, no ONNX RT)
    • 278 m core / 557 m mid / 1113 m fringe              ├── distance_m
         │                                                └── duration_s
         ▼                                                        │
@@ -29,7 +30,7 @@ OSRM /table (chunked) ──► samples.parquet                        ▼
    + random off-network coords ──► offnetwork.parquet  {"duration_s":..,"distance_m":..}
         │
         ▼
-LightGBM ×2  (E1 weights, 511 leaves) ──► model.onnx
+LightGBM ×2  (E1 weights, 511 leaves) ──► model.onnx ──► model.bin
 ```
 
 Feature vector (order is a hard contract between `python/train_export_onnx.py` and
@@ -47,17 +48,20 @@ Feature vector (order is a hard contract between `python/train_export_onnx.py` a
 | 7 | `lon_delta` | `dest_lon - orig_lon` |
 
 Two LightGBM regressors (distance and duration) are flattened into `ai.onnx.ml`
-`TreeEnsembleRegressor` nodes and share one graph, so serving is a single inference call.
+`TreeEnsembleRegressor` nodes and share one graph. At export the nodes are re-serialised
+into a compact `server/models/model.bin`, and the server evaluates the trees with a tiny
+custom C# interpreter (`server/TreeEnsembleModel.cs`) — **no ONNX Runtime at serve time**
+(that native dependency was the dominant RSS cost; see `IMPROVEMENTS.md` E11).
 LightGBM's boost-from-average initial score is measured empirically and baked in as each
 node's `base_values`. Split thresholds are rounded **down** to the largest `float32 ≤
-threshold`, which makes the ONNX comparison exactly equivalent to LightGBM's `float64`
+threshold`, which makes the comparison exactly equivalent to LightGBM's `float64`
 comparison (round-to-nearest could send an input down the wrong branch otherwise — see
 `IMPROVEMENTS.md`).
 
 The model is trained on all-pairs grid samples **plus** random off-network coordinates
 (the service is handed raw coordinates, so it must learn how OSRM snaps them), with
 inverse-frequency sample weights so short trips are not drowned out by long ones. See
-`IMPROVEMENTS.md` for the full experiment log (E1–E9) behind that choice.
+`IMPROVEMENTS.md` for the full experiment log (E1–E11) behind that choice.
 
 ---
 
@@ -78,8 +82,9 @@ npm run osrm:up
 npm run data            # grid + chunked /table -> data/processed/samples.parquet
 npm run data:offnetwork # random raw coords -> data/processed/offnetwork.parquet (E5)
 
-# 3. M2 — train LightGBM and export server/models/model.onnx
-npm run train
+# 3. M2 — train LightGBM and export server/models/model.onnx → model.bin
+npm run train                     # writes model.onnx
+uv run python/export_binary.py    # compiles model.onnx -> model.bin (E11)
 
 # 4. M3 — serve
 npm run serve           # listens on http://localhost:5080
@@ -124,13 +129,16 @@ the HTTP client's own overhead dominating the number.
 │   ├── gen_offnetwork.py           # random raw coords -> OSRM-snapped labels (E5)
 │   ├── build_road_density.py       # OSM road-density raster via pyosmium (E4)
 │   ├── train_export_onnx.py        # LightGBM training, ONNX export, verification
+│   ├── export_binary.py            # model.onnx -> model.bin (E11, no retraining)
 │   ├── experiments.py              # balanced-eval experiment harness (E1–E4/E6/E7/E9)
 │   └── experiment_e5.py            # off-network training experiment (E5)
 ├── server/                         # .NET 10 minimal API
 │   ├── RoutingService.csproj
 │   ├── Program.cs
+│   ├── TreeEnsembleModel.cs        # E11: dependency-free tree interpreter
 │   └── models/
 │       ├── model.onnx              # baked LightGBM ensemble (511 leaves, ONNX-verified)
+│       ├── model.bin               # compiled tree tables served at runtime (E11)
 │       └── model_metadata.json     # feature/target contract + held-out metrics
 └── tests/
     ├── benchmark.py                # latency / RSS / accuracy + golden fixtures
@@ -214,13 +222,14 @@ denser core grid (100–250 m), not more trees.
 
 | measurement | p50 | p90 | p99 | p99.9 |
 |-------------|-----|-----|-----|-------|
-| server-side (`Server-Timing`) | 296 µs | 466 µs | **842 µs** | 1,878 µs |
-| client round-trip (localhost) | 1,201 µs | 1,598 µs | 3,157 µs | 4,076 µs |
+| server-side (`Server-Timing`) | 94 µs | 167 µs | **361 µs** | 1,109 µs |
+| client round-trip (localhost) | 687 µs | 872 µs | 1,488 µs | 2,623 µs |
 
-The plan's **p99 < 1 ms** target is still met on server-side processing time, but the 511-leaf
-model spends ~3.5× more per inference than the original 63-leaf one (p99 240 µs → 842 µs), so the
-headroom is now ~1.2× rather than ~4×. Client round-trip is higher only because it includes
-Python `requests` + loopback HTTP overhead.
+The plan's **p99 < 1 ms** target is met on server-side processing time with ~2.8× headroom.
+Compiling the trees to C# (E11) pulled every percentile down versus the ONNX Runtime build
+(same box, back to back: server-side p50 118 → 94 µs, p99 436 → 361 µs) — the interpreter
+walks 400 shallow trees per target with no native-call or tensor overhead. Client round-trip
+is higher only because it includes Python `httpx` + loopback HTTP overhead.
 
 ### Throughput — head-to-head vs OSRM
 
@@ -255,37 +264,37 @@ container):
 
 | metric | OSRM (`osrm-routed`) | Approx service |
 |--------|----------------------|----------------|
-| **Pss** (shared-page adjusted) | **574 MB** | **410 MB** |
-| RSS | 575 MB | 437 MB |
-| anonymous heap (`Private_Dirty`) | 552 MB | 367 MB |
-| peak high-water (`VmHWM`) | 710 MB | 438 MB |
+| **Pss** (shared-page adjusted) | **574 MB** | **99 MB** |
+| RSS | 575 MB | 136 MB |
+| anonymous heap (`Private_Dirty`) | 552 MB | 85 MB |
+| peak high-water (`VmHWM`) | 710 MB | 146 MB |
 | cgroup usage (container) | 558 MB | — (not containerised) |
-| on-disk artifact | 208 MB (`.osrm*` MLD graph) | 31 MB (`model.onnx`) |
+| on-disk artifact | 208 MB (`.osrm*` MLD graph) | 18 MB (`model.bin`) |
 | threads | 18 | 16 |
 
-The approximation therefore sits **~164 MB below OSRM by Pss (~29% lower; 1.40× ratio)** and ~24%
-lower by RSS — the opposite of what the plan assumed. OSRM's anonymous heap balloons under the
-208 MB MLD graph (552 MB anon); the approximation's 367 MB anon heap is dominated by fixed
-.NET + ONNX Runtime overhead on top of a 31 MB model.
+The approximation therefore sits **~475 MB below OSRM by Pss (~83% lower; 5.8× ratio)** and
+~76% lower by RSS — the opposite of what the plan assumed. OSRM's anonymous heap balloons under the
+208 MB MLD graph (552 MB anon); the approximation's 85 MB anon heap is now dominated by fixed
+.NET/ASP.NET Core host overhead on top of an 18 MB tree table.
 
 The two scale differently, which matters more than the single number: OSRM's footprint grows with
 the road graph, so a larger region pushes it well past this, whereas the approximation is roughly
 *flat* (fixed runtime overhead + model) — the gap widens with map size and would shrink or reverse
 for a very small map. It also ships without a multi-hundred-MB graph.
 
-**The plan's `< 30 MB` target is nonetheless not met.** The approximation is **~410–437 MB**,
-roughly `+10%` from the ~395 MB first recorded at ship time because this is the warm, loaded
-process. This is not a leak — readings are stable — the floor is the .NET/ASP.NET Core runtime, the
-native ONNX Runtime library, and the flattened tree node table (`~43 MB` of the RSS is
-file-backed/`mmap`'d). A `Process`-per-request or interpreter-free design would be required to
-approach single-digit MB; that trade-off was out of scope. The serving *compute* target (p99 < 1 ms,
-zero graph traversal) is met; the *footprint* target is not.
+**The plan's `< 30 MB` target is still not met**, but the gap is now much smaller: **~136 MB**, down
+from ~400 MB before E11. This is not a leak — readings are stable — the floor is now purely the
+.NET/ASP.NET Core/Kestrel runtime; the compiled trees themselves are only ~18 MB. Compiling the
+trees to C# and dropping ONNX Runtime (E11, q.v.) removed the native runtime *and* the ONNX tree
+node table in one step: RSS **428 → 136 MB (−68%)**, Pss **391 → 99 MB**, anon heap **359 → 85 MB**,
+with server-side latency improving at every percentile. Approaching single-digit MB would require a
+non-.NET host; that trade-off was out of scope. The serving *compute* target (p99 < 1 ms, zero graph
+traversal) is met; the *footprint* target is not.
 
-The 511-leaf model is the dominant driver of that footprint: loading the old 63-leaf `model.onnx`
-(3.8 MB) into the same server gives **~138 MB RSS**, the 511-leaf one (32.4 MB) gives **~400 MB**.
-The ONNX CPU memory arena accounts for only ~1 MB of that delta (measured, `IMPROVEMENTS.md` E8) —
-it is the larger tree node table. A deliberate accuracy-for-memory trade, documented rather than
-hidden.
+The 511-leaf capacity (E7) is what made the ONNX-era footprint heavy — loading the 63-leaf
+`model.onnx` (3.8 MB) into the ONNX server gave **~138 MB RSS**, the 511-leaf one (32.4 MB) gave
+**~400 MB** — but E11 breaks that coupling: the tree table is now loaded once into flat arrays and
+costs ~18 MB regardless of the ONNX runtime that used to sit beneath it.
 
 ---
 

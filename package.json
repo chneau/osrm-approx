@@ -2,7 +2,7 @@
   "name": "testing-ml-tte",
   "version": "1.0.0",
   "private": true,
-  "description": "Ultra-fast OSRM approximation service for Greater Manchester (.NET 10 + ONNX)",
+  "description": "Ultra-fast OSRM approximation service for Greater Manchester (.NET 10 + compiled tree ensemble)",
   "scripts": {
     "data": "cd python && uv run generate_grid.py && uv run fetch_osrm_matrix.py",
     "data:offnetwork": "cd python && uv run gen_offnetwork.py",
@@ -10,7 +10,7 @@
     "experiments": "cd python && uv run experiments.py --train-rows 2000000 --test-per-bucket 4000",
     "grid": "cd python && uv run generate_grid.py",
     "matrix": "cd python && uv run fetch_osrm_matrix.py",
-    "train": "cd python && uv run train_export_onnx.py",
+    "train": "cd python && uv run train_export_onnx.py && uv run export_binary.py",
     "osrm:init": "docker compose --profile init up osrm-init",
     "osrm:up": "docker compose --profile serve up -d osrm-routed",
     "osrm:down": "docker compose --profile serve down",

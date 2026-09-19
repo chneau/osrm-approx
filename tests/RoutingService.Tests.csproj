@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="../server/models/model.onnx" Link="models/model.onnx" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../server/models/model.bin" Link="models/model.bin" CopyToOutputDirectory="PreserveNewest" />
     <None Include="golden_routes.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

@@ -84,7 +84,7 @@ public class GoldenRoutesTests
 
     private static readonly Lazy<JsonElement> Fixture = new(LoadFixture);
     private static readonly Lazy<RoutePredictor> Predictor = new(() =>
-        new RoutePredictor(Path.Combine(AppContext.BaseDirectory, "models", "model.onnx")));
+        new RoutePredictor(Path.Combine(AppContext.BaseDirectory, "models", "model.bin")));
 
     private static JsonElement LoadFixture()
     {

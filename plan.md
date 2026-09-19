@@ -2,6 +2,12 @@
 
 **Goal:** Provide an ultra-fast `A → B` lookup returning static `(duration_s, distance_m)` mimicking OSRM routing in Greater Manchester, with **p99 < 1 ms, single-digit MB RSS**, zero per-query graph traversal, and no runtime OSRM container needed.
 
+> **Shipped deviation (see `IMPROVEMENTS.md` E11):** the serving side does **not** embed ONNX
+> Runtime. `python/export_binary.py` compiles the LightGBM trees out of `model.onnx` into
+> `server/models/model.bin`, and the API evaluates them with a dependency-free C# interpreter
+> (`server/TreeEnsembleModel.cs`). This cut server RSS from ~428 MB to ~136 MB. p99 < 1 ms is met;
+> the single-digit-MB RSS target is still not (the floor is the .NET host, ~136 MB).
+
 ---
 
 ## 1. Architecture Overview

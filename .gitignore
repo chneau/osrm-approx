@@ -50,6 +50,8 @@ Thumbs.db
 .idea/
 .vscode/
 
-# NOTE: the exported model (server/models/model.onnx) and the benchmark fixture
-# (tests/golden_routes.json) are intentionally tracked. They are small and let a
-# fresh clone run the service and the test suite without re-running OSRM.
+# NOTE: the exported models (server/models/model.onnx and the compiled
+# server/models/model.bin) and the benchmark fixture (tests/golden_routes.json)
+# are intentionally tracked. They let a fresh clone run the service and the test
+# suite without re-running OSRM. model.bin is a deterministic re-serialisation of
+# model.onnx: `uv run python/export_binary.py`.

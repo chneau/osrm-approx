@@ -4,11 +4,13 @@ Goal: improve the shipped ONNX model (`server/models/model.onnx`), one change at
 time, recording the measured effect of each **even when it makes things worse** (a
 documented negative result is a result).
 
-**Status: complete.** Every experiment (E1–E9) has been run and recorded below. Two
-changes were adopted (E1, E5) plus a capacity bump (E7); the model was retrained,
-re-exported and re-verified end to end. Four changes were rejected on measurement,
-and one (E8) turned out to be a non-issue. The export pipeline also gained a real
-correctness fix (float32 threshold rounding) found while shipping a larger model.
+**Status: complete.** Every experiment (E1–E11) has been run and recorded below. Three
+changes were adopted (E1, E5, E11) plus a capacity bump (E7); the model was retrained,
+re-exported and re-verified end to end. Five changes were rejected on measurement, and
+one (E8) turned out to be a non-issue. The export pipeline also gained a real
+correctness fix (float32 threshold rounding) found while shipping a larger model. **E11
+compiles the trees to C# and drops ONNX Runtime entirely — the first change that moves
+server RSS (428 → 136 MB).**
 
 ## Evidence: why the model originally failed at short range
 
@@ -72,6 +74,8 @@ sets the ceiling on feature engineering alone.
 | E7 | Objective / capacity tuning (`huber`, leaves, `min_child_samples`) | Resolution for the short regime | **done — capacity (511 leaves) adopted** |
 | E8 | ONNX Runtime session tuning (mem arena) | Cut the RSS | **done — null result (already tuned)** |
 | E9 | Tree pruning (400 → N trees) | Size/latency vs accuracy trade | **done — pruning costs accuracy** |
+| E10 | Quantise the ONNX trees (`int8`/`float16`) | Shrink the 32 MB model → RSS | **done — impossible with stock ORT, reverted** |
+| E11 | Compile the trees to C# (drop ONNX Runtime) | The only lever that moves RSS | **done — big win, adopted** |
 
 ### Notes on each
 
@@ -111,6 +115,86 @@ exposed a real ONNX export precision bug.
 **E8.** Already had `InterOpNumThreads=1`, `IntraOpNumThreads=1`,
 `ORT_ENABLE_ALL`, `ORT_SEQUENTIAL`. Only the CPU memory arena was untested; disabling
 it changed RSS by ~1 MB (noise). The RSS is driven by model size, not the arena.
+
+## E10 — ONNX tree quantisation (reverted)
+
+The 32 MB model is the RSS driver (E8), so the obvious lever is storing the trees in a
+narrower type. It does not work with stock ONNX Runtime: the tree kernels are templated
+on `float`, and the attribute readers call `GetAnyVectorAttrsOrDefault<float>(...)`,
+which **rejects** `float16`/`int8` `*_as_tensor` attributes for `nodes_values`,
+`target_weights`, etc. on both ORT 1.30 and 1.29.
+
+One trim *was* possible: the all-zero `nodes_hitrates` attribute is unused and could be
+dropped, taking the file **32.44 → 28.35 MB (−12.6%, bit-identical output)** and warm RSS
+**396 → 389 MB**. Because the same binary block is re-serialised far more effectively by
+E11, this change was **reverted** rather than shipped. The only E10 artefact kept is an
+unrelated dependency fix (`scikit-learn` is required by `lgb.LGBMRegressor`).
+
+## E11 — compile the trees to C#, drop ONNX Runtime (adopted)
+
+The RSS is dominated by the ONNX Runtime native library plus its flattened node table,
+not by the 32 MB model file alone (E8). The only way to move it is to stop using ORT.
+
+`python/export_binary.py` re-serialises the two `TreeEnsembleRegressor` nodes out of
+`model.onnx` into a flat `server/models/model.bin` — **no retraining**, a pure
+re-serialisation of the already-verified model:
+
+```
+magic char[4] "OSRT" | version u32 | n_features u32 | n_targets u32
+per target (graph order distance_m, duration_s):
+  base_value f32 | n_trees u32 | n_nodes u32 | tree_offsets i32[n_trees+1]
+  feature i32[n] | threshold f32[n] | left i32[n] | right i32[n] | value f32[n]
+  is_leaf u8[n] | default_left u8[n]
+```
+
+The server replaces `InferenceSession` with `TreeEnsembleModel` (`server/TreeEnsembleModel.cs`),
+a ~150-line, allocation-free walker: for every tree, follow `x <= threshold` to the left
+child until a leaf, summing the leaf value onto the base. This is exactly ONNX
+`BRANCH_LEQ` semantics. Node child ids are rebased to **global** rows at export time (the
+ONNX attributes store *per-tree* node ids — the first implementation forgot this and
+silently read the wrong leaf for every tree after the first).
+
+**Correctness.** The extracted arrays are byte-identical to the ONNX attributes
+(feature/threshold/left/right/leaf/value all `array_equal`). End-to-end the interpreter
+reproduces ONNX Runtime to within float32 summation-order noise — **max |Δ| 0.07 m** on
+distance and **0.005 s** on duration over 20k random pairs (≈3×10⁻⁶ relative). It is
+*not* bit-exact (ORT sums the 400 leaves in a different order), but the residual is two
+orders of magnitude below the service's 1-decimal output rounding and the 0.11 golden
+tolerance. The 38-test suite passes unchanged on `model.bin`.
+
+### Measured effect (both servers built and run on this box, back to back)
+
+Single route, `curl`-warm, then 3,000 requests reading the `Server-Timing` header, plus
+`wrk -t8 -c64 -d15s`; RSS read from `/proc/<pid>/smaps_rollup` after load:
+
+| metric | ONNX Runtime | compiled trees (C#) | change |
+|---|---|---|---|
+| **RSS** (VmRSS) | 428 MB | **136 MB** | **−68% (3.1×)** |
+| **Pss** (shared-page adjusted) | 391 MB | **99 MB** | **−75% (3.9×)** |
+| anonymous heap (`Private_Dirty`) | 359 MB | **85 MB** | **−76% (4.2×)** |
+| peak high-water (`VmHWM`) | 437 MB | **146 MB** | **−67%** |
+| server-side latency p50 | 118 µs | **94 µs** | −20% |
+| server-side latency p99 | 436 µs | **361 µs** | −17% |
+| server-side latency p99.9 | 1,306 µs | **1,109 µs** | −15% |
+| `wrk` throughput (single route) | 44,498 req/s | 40,584 req/s | within client-bound noise |
+| on-disk artifact | 32.44 MB (`model.onnx`) | **17.97 MB** (`model.bin`) | −45% |
+
+**Adopted.** This is the first change that materially moves RSS (the plan's headline
+constraint). Server-side latency improves at every percentile; `wrk` throughput is
+dominated by the HTTP client on this box and is comparable run-to-run. The 38-test
+suite still passes.
+
+### Honest costs / limits
+
+- **RSS is still ~136 MB, far above the plan's `< 30 MB` target.** The floor is now the
+  .NET runtime and ASP.NET Core/Kestrel hosting, not the model: the trees themselves are
+  only ~18 MB. Getting to single-digit MB would mean a non-.NET host — out of scope.
+- **`model.bin` is a new tracked 18 MB artifact.** It is derived deterministically from
+  `model.onnx` (`uv run python/export_binary.py`), which remains tracked as the source of
+  truth.
+- **`wrk` throughput did not improve** (40.6k vs 44.5k req/s); the win is RSS and
+  per-request latency, not client-bound RPS.
+
 
 ## Export correctness fix (found while shipping E7)
 
