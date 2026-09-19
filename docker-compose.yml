@@ -1,0 +1,42 @@
+# OSRM backend for the Greater Manchester map.
+#
+# This stack is used ONLY during offline dataset generation (milestones M0/M1).
+# It is never queried at runtime by the .NET serving service.
+#
+#   docker compose up -d osrm-init     # one-shot: extract / partition / customize
+#   docker compose up -d osrm-routed   # serve /table and /route
+#   docker compose down                # decommission after training
+services:
+  osrm-init:
+    image: osrm/osrm-backend:latest
+    container_name: osrm-manchester-init
+    profiles: ["init"]
+    volumes:
+      - ./data/raw:/data
+    command: >
+      sh -lc "
+      set -e;
+      cd /data;
+      osrm-extract   -p /opt/car.lua greater-manchester.osm.pbf;
+      osrm-partition greater-manchester.osrm;
+      osrm-customize greater-manchester.osrm;
+      echo 'OSRM pre-processing complete';
+      ls -la greater-manchester.osrm*
+      "
+
+  osrm-routed:
+    image: osrm/osrm-backend:latest
+    container_name: osrm-manchester-routed
+    profiles: ["serve"]
+    volumes:
+      - ./data/raw:/data
+    command: >
+      osrm-routed --algorithm mld --max-table-size 10000 --port 5000 /data/greater-manchester.osrm
+    ports:
+      - "5001:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- 'http://localhost:5000/route/v1/driving/-2.24,53.48;-2.25,53.49?overview=false' >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped

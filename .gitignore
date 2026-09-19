@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# Generated / heavyweight data
+# ---------------------------------------------------------------------------
+# data/raw holds the downloaded OSM extract plus the OSRM .osrm* graph build
+# artefacts (hundreds of MB); both are reproduced by `npm run osrm:init`.
+# data/processed holds grid.parquet / samples.parquet from `npm run data`.
+# The directory scaffolding is kept with .gitkeep so the quickstart curl/scripts
+# have somewhere to write.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# ---------------------------------------------------------------------------
+# Python (uv)
+# ---------------------------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---------------------------------------------------------------------------
+# .NET
+# ---------------------------------------------------------------------------
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# ---------------------------------------------------------------------------
+# Node
+# ---------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+
+# ---------------------------------------------------------------------------
+# Container / runtime scratch
+# ---------------------------------------------------------------------------
+*.log
+
+# ---------------------------------------------------------------------------
+# Editors & OS
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# NOTE: the exported model (server/models/model.onnx) and the benchmark fixture
+# (tests/golden_routes.json) are intentionally tracked. They are small and let a
+# fresh clone run the service and the test suite without re-running OSRM.

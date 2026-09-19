@@ -1,0 +1,243 @@
+{
+  "generated_at": "2026-09-19T19:48:22.158010+00:00",
+  "service_url": "http://localhost:5080",
+  "osrm_url": "http://localhost:5001",
+  "latency_us": {
+    "n": 2000,
+    "mean_us": 908.5844615,
+    "p50_us": 864.3340000000001,
+    "p90_us": 1080.1772000000003,
+    "p99_us": 1727.9564799999998,
+    "p999_us": 2913.3687850000224,
+    "max_us": 3115.604,
+    "throughput_rps": 1100.6131431623653
+  },
+  "server_latency_us": {
+    "n": 2000,
+    "mean_us": 112.8695,
+    "p50_us": 104.0,
+    "p90_us": 154.0,
+    "p99_us": 240.01999999999998,
+    "p999_us": 598.093000000019,
+    "max_us": 964.0,
+    "throughput_rps": 8859.789402805894
+  },
+  "concurrency": {
+    "threads": 8,
+    "rps": 46380.3,
+    "wrk": {
+      "rps": 46380.3,
+      "p99_us": 4310.0,
+      "threads": 8,
+      "connections": 64
+    }
+  },
+  "memory": {
+    "rss_before_mb": 162.21875,
+    "rss_after_mb": 165.15625
+  },
+  "accuracy": {
+    "duration": {
+      "n": 600,
+      "mae": 196.00166666666667,
+      "medae": 114.64999999999995,
+      "p90_abs_err": 473.09000000000003,
+      "medape_pct": 6.627980727771105,
+      "p90_ape_pct": 31.050092755149212,
+      "within_10pct": 63.83333333333333,
+      "within_25pct": 86.83333333333333
+    },
+    "distance": {
+      "n": 600,
+      "mae": 3081.399333333333,
+      "medae": 1833.800000000001,
+      "p90_abs_err": 7301.880000000005,
+      "medape_pct": 6.664021766899518,
+      "p90_ape_pct": 30.264755236764017,
+      "within_10pct": 63.66666666666667,
+      "within_25pct": 87.5
+    }
+  },
+  "routes": [
+    {
+      "name": "manchester-piccadilly-to-victoria",
+      "orig": [
+        53.477,
+        -2.2309
+      ],
+      "dest": [
+        53.4875,
+        -2.2427
+      ],
+      "osrm_distance_m": 2286.1,
+      "osrm_duration_s": 353.7,
+      "approx_distance_m": 2169.8,
+      "approx_duration_s": 289.7
+    },
+    {
+      "name": "city-centre-to-old-trafford",
+      "orig": [
+        53.4808,
+        -2.2426
+      ],
+      "dest": [
+        53.4631,
+        -2.2913
+      ],
+      "osrm_distance_m": 6100.2,
+      "osrm_duration_s": 753.9,
+      "approx_distance_m": 5044.1,
+      "approx_duration_s": 541.8
+    },
+    {
+      "name": "city-centre-to-manchester-airport",
+      "orig": [
+        53.4808,
+        -2.2426
+      ],
+      "dest": [
+        53.3537,
+        -2.2749
+      ],
+      "osrm_distance_m": 20607.6,
+      "osrm_duration_s": 2451.6,
+      "approx_distance_m": 19243.8,
+      "approx_duration_s": 1412.8
+    },
+    {
+      "name": "etihad-to-trafford-park",
+      "orig": [
+        53.4831,
+        -2.2004
+      ],
+      "dest": [
+        53.4656,
+        -2.2866
+      ],
+      "osrm_distance_m": 7531.8,
+      "osrm_duration_s": 817.6,
+      "approx_distance_m": 7788.1,
+      "approx_duration_s": 845.5
+    },
+    {
+      "name": "didsbury-to-salford-quays",
+      "orig": [
+        53.4165,
+        -2.228
+      ],
+      "dest": [
+        53.4713,
+        -2.2953
+      ],
+      "osrm_distance_m": 9681.8,
+      "osrm_duration_s": 1040.3,
+      "approx_distance_m": 10911.6,
+      "approx_duration_s": 1022.6
+    },
+    {
+      "name": "stockport-to-bolton",
+      "orig": [
+        53.4106,
+        -2.1575
+      ],
+      "dest": [
+        53.578,
+        -2.4282
+      ],
+      "osrm_distance_m": 34971.1,
+      "osrm_duration_s": 1752.7,
+      "approx_distance_m": 36974.8,
+      "approx_duration_s": 1779.9
+    },
+    {
+      "name": "wigan-to-rochdale",
+      "orig": [
+        53.545,
+        -2.631
+      ],
+      "dest": [
+        53.6097,
+        -2.1561
+      ],
+      "osrm_distance_m": 41070.1,
+      "osrm_duration_s": 2208.1,
+      "approx_distance_m": 41986.5,
+      "approx_duration_s": 2278.8
+    },
+    {
+      "name": "bury-to-oldham",
+      "orig": [
+        53.5934,
+        -2.2971
+      ],
+      "dest": [
+        53.5409,
+        -2.1114
+      ],
+      "osrm_distance_m": 20550.3,
+      "osrm_duration_s": 1285.8,
+      "approx_distance_m": 19545.3,
+      "approx_duration_s": 1140.0
+    },
+    {
+      "name": "altrincham-to-ashton",
+      "orig": [
+        53.3871,
+        -2.352
+      ],
+      "dest": [
+        53.4906,
+        -2.0936
+      ],
+      "osrm_distance_m": 26671.9,
+      "osrm_duration_s": 1647.4,
+      "approx_distance_m": 29092.3,
+      "approx_duration_s": 1722.0
+    },
+    {
+      "name": "chorlton-to-prestwich",
+      "orig": [
+        53.442,
+        -2.279
+      ],
+      "dest": [
+        53.535,
+        -2.283
+      ],
+      "osrm_distance_m": 22130.2,
+      "osrm_duration_s": 1175.7,
+      "approx_distance_m": 18291.2,
+      "approx_duration_s": 1229.9
+    },
+    {
+      "name": "city-centre-to-bury",
+      "orig": [
+        53.4808,
+        -2.2426
+      ],
+      "dest": [
+        53.5934,
+        -2.2971
+      ],
+      "osrm_distance_m": 16819.0,
+      "osrm_duration_s": 1369.4,
+      "approx_distance_m": 17390.3,
+      "approx_duration_s": 1311.3
+    },
+    {
+      "name": "sale-to-middleton",
+      "orig": [
+        53.4244,
+        -2.3227
+      ],
+      "dest": [
+        53.5547,
+        -2.1937
+      ],
+      "osrm_distance_m": 29283.6,
+      "osrm_duration_s": 1473.3,
+      "approx_distance_m": 29634.6,
+      "approx_duration_s": 1490.8
+    }
+  ]
+}
