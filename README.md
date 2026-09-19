@@ -226,7 +226,8 @@ Python `requests` + loopback HTTP overhead.
 
 Identical load profile (`wrk -t8 -c64 -d15s`) run against the approximation service and a live
 `osrm-routed`, on the same 16-vCPU box, back to back. The OSRM container had **no CPU limit**
-(unlimited cores, ~394 MB RSS, 250 MB MLD graph on disk), so this is a like-for-like comparison:
+(unlimited cores; its steady-state footprint is measured in the Memory section below), so this is a
+like-for-like comparison:
 
 | metric | OSRM (`osrm-routed`) | Approx service |
 |--------|----------------------|----------------|
@@ -246,24 +247,45 @@ direction), and OSRM's larger JSON payload accounts for part of its latency. OSR
 ground truth; the approximation buys speed and a far lighter deployment at ~4.9%/4.1% MedAPE on
 random pairs.
 
-### Memory — **target not met**
+### Memory — head-to-head vs OSRM (**plan target not met**)
 
-Resident set size after warm-up is **~395 MB** (≈ +36 MB under sustained load), against the plan's
-**< 30 MB** target. This is not a code leak: the floor is the .NET/ASP.NET Core runtime plus the
-native ONNX Runtime shared library, and the flattened tree table of the shipped model. A
-`Process`-per-request or interpreter-free design would be required to approach single-digit MB;
-that trade-off was out of scope. The serving *compute* target (p99 < 1 ms, no graph traversal) is
-met, the *footprint* target is not.
+Both services were warmed with 200 synthetic `A → B` requests, then sampled from
+`/proc/<pid>/smaps_rollup` at steady state (three identical readings, OSRM read inside its
+container):
 
-The 511-leaf model is a real part of that footprint and the dominant reason it grew: loading the
-old 63-leaf `model.onnx` (3.8 MB) into the same server gives **~138 MB RSS**, the 511-leaf one
-(32.4 MB) gives **~400 MB**. The ONNX CPU memory arena accounts for ~1 MB of that difference
-(measured, see `IMPROVEMENTS.md` E8) — it is the larger tree node table, not the arena. It is a
-deliberate accuracy-for-memory trade.
+| metric | OSRM (`osrm-routed`) | Approx service |
+|--------|----------------------|----------------|
+| **Pss** (shared-page adjusted) | **574 MB** | **410 MB** |
+| RSS | 575 MB | 437 MB |
+| anonymous heap (`Private_Dirty`) | 552 MB | 367 MB |
+| peak high-water (`VmHWM`) | 710 MB | 438 MB |
+| cgroup usage (container) | 558 MB | — (not containerised) |
+| on-disk artifact | 208 MB (`.osrm*` MLD graph) | 31 MB (`model.onnx`) |
+| threads | 18 | 16 |
 
-For reference, the live `osrm-routed` container held **~394 MB RSS** on top of a 250 MB on-disk
-MLD graph — so the approximation is now roughly *level* with OSRM on footprint, and still wins on
-deployment size (no 250 MB graph to ship).
+The approximation therefore sits **~164 MB below OSRM by Pss (~29% lower; 1.40× ratio)** and ~24%
+lower by RSS — the opposite of what the plan assumed. OSRM's anonymous heap balloons under the
+208 MB MLD graph (552 MB anon); the approximation's 367 MB anon heap is dominated by fixed
+.NET + ONNX Runtime overhead on top of a 31 MB model.
+
+The two scale differently, which matters more than the single number: OSRM's footprint grows with
+the road graph, so a larger region pushes it well past this, whereas the approximation is roughly
+*flat* (fixed runtime overhead + model) — the gap widens with map size and would shrink or reverse
+for a very small map. It also ships without a multi-hundred-MB graph.
+
+**The plan's `< 30 MB` target is nonetheless not met.** The approximation is **~410–437 MB**,
+roughly `+10%` from the ~395 MB first recorded at ship time because this is the warm, loaded
+process. This is not a leak — readings are stable — the floor is the .NET/ASP.NET Core runtime, the
+native ONNX Runtime library, and the flattened tree node table (`~43 MB` of the RSS is
+file-backed/`mmap`'d). A `Process`-per-request or interpreter-free design would be required to
+approach single-digit MB; that trade-off was out of scope. The serving *compute* target (p99 < 1 ms,
+zero graph traversal) is met; the *footprint* target is not.
+
+The 511-leaf model is the dominant driver of that footprint: loading the old 63-leaf `model.onnx`
+(3.8 MB) into the same server gives **~138 MB RSS**, the 511-leaf one (32.4 MB) gives **~400 MB**.
+The ONNX CPU memory arena accounts for only ~1 MB of that delta (measured, `IMPROVEMENTS.md` E8) —
+it is the larger tree node table. A deliberate accuracy-for-memory trade, documented rather than
+hidden.
 
 ---
 
