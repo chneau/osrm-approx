@@ -221,3 +221,66 @@ short **raw-coordinate** trips — is not solved by any of them. Per Experiments
 probably unsolvable by any coordinate-only method, because it is genuine route-choice and
 network topology. S2 is the only proposal here that stops approximating a discontinuous
 function with a smooth one.
+
+---
+
+## Appendix A — measured S1 prototype + fixed-point encoding
+
+Prototypes: `experiments/try_s1.py`, `experiments/try_s1_fair.py`. The first ONNX
+comparison was **contaminated** — the shipped model was trained on
+`data/processed/offnetwork.parquet`, so scoring it there flatters it. `try_s1_fair.py`
+retrains a 511-leaf / 400-tree GBM on `samples.parquet` + 80% of the off-network pairs,
+holds out the other 20%, and scores both models on the **same unseen raw coordinates**.
+
+### Head-to-head (raw / off-network coordinates, N=31,761)
+
+| model | target | Median APE | MAE | 1–3 km MedAPE |
+|---|---|---|---|---|
+| **GBM** (honest, never saw the test rows) | distance | **2.6%** | **1,140 m** | 32% |
+| **S1** nearest grid-node lookup (2,203 nodes) | distance | 3.4% | 1,945 m | 100% |
+| **GBM** (honest) | duration | **2.4%** | **66 s** | 2.4% |
+| **S1** nearest grid-node lookup | duration | 5.0% | 166 s | 4.7% |
+
+S1 with `k=4/8` inverse-distance-weighted interpolation did **not** improve on nearest-node
+lookup. S1 is viable and far simpler, but the GBM is genuinely better: ~1.7× lower
+distance MAE and ~2.5× lower duration MAE. The gap is the off-network snapping the GBM
+learned (E5) and a fixed-node matrix cannot represent; the `1–3 km` distance column is the
+clearest symptom.
+
+### Fixed-point coordinate encoding (Greater Manchester bbox, offset from origin)
+
+| scale | precision | lat span | lon span | bits needed | signed int24? |
+|---|---|---|---|---|---|
+| 1e-4 | ~11 m | 3,500 | 8,699 | 14 | yes |
+| 1e-5 | ~1.1 m | 35,000 | 86,999 | 17 | yes |
+| 1e-6 | ~11 cm | 350,000 | 869,999 | 20 | yes |
+| 1e-7 | ~1.1 cm | 3,500,000 | 8,699,999 | 24 | no (needs unsigned 24) |
+
+So 24-bit offsets are fine for a bounded region and overkill at ~1 m (17 bits). Global
+lat/lon at 1e-5 needs 25 bits signed and does **not** fit int24.
+
+### Where the memory actually is
+
+For S1 the coordinates are `O(N)` and the matrix is `O(N²)`. At N=2,203, 24-bit
+coordinates cost ~13 KB versus a 39 MB matrix — packing them saves nothing. Quantise the
+**matrix** instead:
+
+| matrix encoding (2 targets, N=2,203) | size | accuracy cost |
+|---|---|---|
+| float32 | 38.8 MB | — |
+| **uint16, distance in decametres + duration in seconds** | **19.4 MB** | max 5 m / mean 2.5 m, zero overflow |
+
+(`uint16` metres overflowed on 0.0044% of pairs — max distance 70,124 m — so decametres
+are required.)
+
+### Scaling wall
+
+At the current ~1 km lattice `N=2,203`. A 250 m lattice is ~35,000 nodes, so the matrix is
+~1.2 billion entries → ~2.5 GB even at `uint16`. Fixed-point compression buys 2–4×, not
+the ~16× needed. This is the structural reason a learned model can beat a stored matrix.
+
+### Verdict
+
+Adopt S1 only if the short-trip regression is acceptable; then use `uint16`
+decametre+second matrix values (the real saving) and optional 20/24-bit coordinate offsets.
+If accuracy must hold, prefer **S4** (drop the ONNX bridge) or **S2** (exact oracle).
