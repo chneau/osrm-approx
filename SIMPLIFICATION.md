@@ -260,6 +260,112 @@ and network topology, not a coordinate-modelling gap. Only an exact road-network
 
 ---
 
+## 5. Related work
+
+> **Citation caveat:** this list was assembled from memory, not a live search. Author/venue
+> keys are reliable enough to look up, but verify exact titles on Google Scholar / arXiv /
+> the linked project before quoting them.
+
+### 5.1 Exact distance oracles (the S2 family)
+
+- **Contraction Hierarchies (CH)** — Geisberger, Sanders, Schultes, Delling (2008).
+  Shortcut-based preprocessing + bidirectional upward search. What OSRM's `--algorithm ch`
+  is.
+- **Highway Hierarchies** — Sanders & Schultes (2005–2006). Predecessor of CH.
+- **Highway Dimension** — Abraham, Fiat, Kaplan, Lucier, *Highway Dimension, Shortest
+  Paths, and Provably Efficient Algorithms* (SODA 2010). **The theory that explains why
+  road networks admit tiny search spaces and labels — and, by contrast, why a sampled
+  proximity graph does not (Appendix B).**
+- **Customizable Route Planning (CRP) / Multi-Level Dijkstra (MLD)** — Delling, Goldberg,
+  Pajor, Werneck (SEA 2011; Transportation Science 2017). OSRM's default algorithm.
+- **Hub Labeling** — Abraham, Delling, Goldberg, Werneck, *A Hub-Based Labeling Algorithm
+  for Shortest Paths in Road Networks* (SEA 2011). The exact oracle S2 approximates.
+- **Pruned Landmark Labeling (PLL)** — Akiba, Iwata, Yoshida (SIGMOD 2013). The algorithm
+  implemented in `experiments/pll.c`.
+- **ALT (A\* + landmarks)** — Goldberg & Harrelson (2005). Landmark lower bounds; the
+  landmark-oracle experiment (Appendix B) is the upper-bound cousin.
+- **PHAST / many-to-many** — Delling, Goldberg, Werneck (2011). Batched shortest paths,
+  relevant to `/table`-style matrix generation.
+- **Approximate distance oracles (general graphs)** — Thorup & Zwick (JACM 2005);
+  Patrascu & Roditty (FOCS 2010). The `(2k−1)`-stretch / `O(n^{1+1/k})`-space frontier
+  that road networks beat because of bounded highway dimension.
+
+### 5.2 Practical routing engines
+
+- **OSRM** — `Project-OSRM/osrm-backend` (CH + MLD, `/table`).
+- **Valhalla** — `valhalla/valhalla` (tiled hierarchy, dynamic costing, isochrones).
+- **GraphHopper** — `graphhopper/graphhopper` (CH/ALT, Java).
+- **RoutingKit** — Karlsruhe (CH, CRP, PHAST), C++ reference implementations.
+- **r5** — `conveyal/r5` (fast many-to-many matrices, transport planning).
+- **pgRouting** — PostGIS extension.
+
+### 5.3 Approximate distance estimation from coordinates
+
+Closest academic framing to this repo (S1/S3, and the tree ensemble).
+
+- **Landmark / sketch distance estimation** — Potamias, Bonchi, Castillo, Gionis, *Fast
+  Shortest Path Distance Estimation in Large Networks* (CIKM 2009).
+- **Low-dimensional metric embeddings of road networks** — search "low distortion embedding
+  road network distance" / "Euclidean embedding road networks" (Abraham, Bartal, Neiman
+  and follow-ups). A linear/embedding alternative to the tree ensemble.
+- **Spatial interpolation of travel-time / OD matrices** — kriging and Gaussian-process
+  models for OD travel time; the academic version of S1's matrix + interpolation.
+- **"Network distance from Euclidean distance" / detour-factor models** — recurring
+  GIScience topic; the analytic baseline in S3.
+- **Isochrone / travel-time rasters** — Valhalla & ORS isochrones; accessibility literature.
+
+### 5.4 Learned / neural approaches
+
+- **ETA / travel-time regression** — *Learning to Estimate the Travel Time* (Wang et al.,
+  KDD 2018); Uber's **DeepETA** (engineering blog, 2022); Google Maps' GNN traffic
+  prediction. Note: these predict on routes/trajectory features, not raw coordinate pairs.
+- **GNNs for shortest paths / distance** — *Neural Bellman-Ford Networks* (ICLR 2022);
+  *A\*Net* (ICLR 2023); *Path Planning using Neural A\* Search* (Yonetani et al., ICML
+  2021).
+- **"Neural distance oracle"** — search this exact phrase on arXiv/Scholar; there is
+  2022–2024 work here, though I can't name a specific paper confidently.
+- **Amortized shortest path / learned oracles** — search "learned distance oracle",
+  "amortized shortest path".
+
+**Honest gap:** I'm not aware of a well-known project that specifically mimics **OSRM
+outputs from raw coordinates with a GBM**, which is what this repo does. The closest
+framings are travel-time estimation and learned distance oracles.
+
+### 5.5 Integer / fixed-point geospatial encodings
+
+Relevant to the int24 question (Appendix A): Google's **S2 geometry** (64-bit fixed point
+on the sphere) and Uber's **H3** (hexagonal integer indexing). Both use integer
+quantisation, but much coarser than 24-bit and not distance oracles.
+
+### 5.6 Benchmarks and data
+
+- **DIMACS Implementation Challenge — 9th: Shortest Paths** (2006): canonical road-network
+  datasets and query sets; the standard for comparing CH/ALT/hub labeling.
+- **PACE** challenge (check the 2024 edition's scope).
+- **Transportation Networks for Research (TNTP)**: classic networks with turn penalties.
+- **OpenStreetMap + OSRM** as open ground truth (used here).
+- **RoutingKit / Karlsruhe benchmark pages**.
+
+### 5.7 How the measured findings map to the literature
+
+| Finding here | Literature equivalent |
+|---|---|
+| Tree ensemble (8 features → dist/dur) | Amortized learned distance oracle; ETA/travel-time regression |
+| S1 all-pairs matrix + interpolation | OD-matrix interpolation / kriging; truncated exact oracle |
+| S2 hub labels / PLL | Hub labeling (Abraham 2011), PLL (Akiba 2013) |
+| S2 proximity graph overestimates +35% | Highway-dimension theory (Abraham 2010); segments, not sampled metrics |
+| S2 landmark oracle ≈5% | ALT / landmark distance estimation (Goldberg-Harrelson 2005; Potamias 2009) |
+| Simplified OSM loses turn rules/speeds | Why engines keep edge-based graphs + turn tables (CH / CRP / MLD) |
+| Distributed OSRM `/table` generation | PHAST / many-to-many (Delling 2011) |
+| int24 fixed-point coordinates | S2 geometry / H3 integer encoding |
+
+**Suggested reading order for this project:** (1) Abraham et al., Highway Dimension —
+explains the S2 result; (2) Akiba et al., PLL — the algorithm implemented; (3) Delling
+et al., CRP/MLD — what OSRM does; (4) Potamias et al. (2009) — canonical graph distance
+estimation; (5) an ETA/prediction survey — the ML framing closest to the tree ensemble.
+
+---
+
 ## Appendix A — measured S1 prototype + fixed-point encoding
 
 Prototypes: `experiments/try_s1.py`, `experiments/try_s1_fair.py`. The first ONNX
