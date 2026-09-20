@@ -163,6 +163,8 @@ def main() -> int:
     ap.add_argument("--max-coords", type=int, default=1200, help="sources + destinations per HTTP request")
     ap.add_argument("--max-snap-m", type=float, default=250.0, help="drop grid points further than this from a road")
     ap.add_argument("--include-self", action="store_true", help="keep A->A pairs (all zeros)")
+    ap.add_argument("--probe-a", default=None, help="'lat,lon' sanity-probe origin (default: most-separated grid point)")
+    ap.add_argument("--probe-b", default=None, help="'lat,lon' sanity-probe destination (default: most-separated grid point)")
     args = ap.parse_args()
 
     grid = pd.read_parquet(args.grid)
@@ -192,22 +194,50 @@ def main() -> int:
     n = len(lat)
     print(f"[matrix] routable grid points: {n} -> {n * n:,} ordered pairs")
 
-    # Sanity probe on two points guaranteed to lie on the network: the grid
-    # points closest to the city centre and to Manchester Airport.
+    # Sanity probe: route between two grid points known to be far apart. This
+    # catches the classic coordinate-order bug (OSRM expects lon,lat) -- a swap
+    # yields an all-zero/absurd matrix. Picking the most-separated pair makes it
+    # region-agnostic instead of hard-coding one city's landmarks.
     def _nearest_idx(target_lat: float, target_lon: float) -> int:
         return int(np.argmin((lat - target_lat) ** 2 + (lon - target_lon) ** 2))
 
-    a = _nearest_idx(53.4808, -2.2426)
-    b = _nearest_idx(53.3537, -2.2749)
+    if args.probe_a and args.probe_b:
+        pa_lat, pa_lon = (float(v) for v in args.probe_a.split(","))
+        pb_lat, pb_lon = (float(v) for v in args.probe_b.split(","))
+        a, b = _nearest_idx(pa_lat, pa_lon), _nearest_idx(pb_lat, pb_lon)
+    else:
+        a = 0
+        dlat = np.radians(lat - lat[a])
+        dlon = np.radians(lon - lon[a])
+        hav = 2.0 * 6_371_008.8 * np.arcsin(
+            np.sqrt(np.clip(np.sin(dlat / 2) ** 2 + np.cos(np.radians(lat[a])) * np.cos(np.radians(lat)) * np.sin(dlon / 2) ** 2, 0, 1))
+        )
+        b = int(np.argmax(hav))
+        if b == a:
+            b = min(1, n - 1)
+
+    straight_m = 2.0 * 6_371_008.8 * np.arcsin(
+        np.sqrt(np.clip(
+            np.sin(np.radians(lat[b] - lat[a]) / 2) ** 2
+            + np.cos(np.radians(lat[a])) * np.cos(np.radians(lat[b])) * np.sin(np.radians(lon[b] - lon[a]) / 2) ** 2,
+            0, 1,
+        ))
+    )
     try:
         probe_dur, probe_dist = client.table(lat[a : a + 1], lon[a : a + 1], lat[b : b + 1], lon[b : b + 1])
         probe_s, probe_m = float(probe_dur.ravel()[0]), float(probe_dist.ravel()[0])
-        print(f"[matrix] probe (city centre -> airport) = {probe_s:.1f}s / {probe_m:.1f}m")
-        if not np.isfinite(probe_s) or probe_m < 10_000.0:
+        print(f"[matrix] probe ({lat[a]:.5f},{lon[a]:.5f} -> {lat[b]:.5f},{lon[b]:.5f}) = {probe_s:.1f}s / {probe_m:.1f}m (straight {straight_m:.0f}m)")
+        # A road route is never materially shorter than the great-circle line;
+        # a finite value near zero means the matrix is misaligned or lon/lat
+        # swapped. An unreachable pair (null) is legitimate in island regions, so
+        # warn rather than abort there.
+        if np.isfinite(probe_s) and np.isfinite(probe_m) and probe_m < 0.8 * straight_m:
             raise RuntimeError(
                 f"probe returned a degenerate route ({probe_s}s / {probe_m}m) -- "
                 "check coordinate order (OSRM expects lon,lat)"
             )
+        if not np.isfinite(probe_s) or not np.isfinite(probe_m):
+            print("[matrix] probe pair is unreachable by car; skipping the swap check", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001
         print(f"[matrix] FATAL: OSRM sanity probe failed: {exc}", file=sys.stderr)
         return 1

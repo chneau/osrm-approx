@@ -47,7 +47,8 @@ def main() -> int:
     rng = np.random.default_rng(args.seed)
     lat = rng.uniform(BBOX["min_lat"], BBOX["max_lat"], size=args.points)
     lon = rng.uniform(BBOX["min_lon"], BBOX["max_lon"], size=args.points)
-    print(f"[offnet] {args.points} random coordinates in the GM bbox")
+    print(f"[offnet] {args.points} random coordinates in bbox "
+          f"({BBOX['min_lat']:.4f},{BBOX['min_lon']:.4f})-({BBOX['max_lat']:.4f},{BBOX['max_lon']:.4f})")
 
     client = OsrmClient(args.url)
 
