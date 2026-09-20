@@ -117,8 +117,9 @@ coords). Adopted: `train_export_onnx.py --extra-samples` auto-loads
 gain over the single larger model — rejected.
 
 **E7/E9.** Capacity keeps helping (63 → 511 leaves); pruning (fewer trees) always
-costs accuracy. The cost of 511 leaves is model size and RSS (see below), and it
-exposed a real ONNX export precision bug.
+costs accuracy. That capacity is not free — the "E7 — the capacity price" subsection
+below measures it at **+29.4 MB RSS for ~1.8× lower MedAPE** — and shipping a larger
+model exposed a real ONNX export precision bug.
 
 **E8.** Already had `InterOpNumThreads=1`, `IntraOpNumThreads=1`,
 `ORT_ENABLE_ALL`, `ORT_SEQUENTIAL`. Only the CPU memory arena was untested; disabling
@@ -194,9 +195,21 @@ suite still passes.
 
 ### Honest costs / limits
 
-- **RSS is still ~136 MB, far above the plan's `< 30 MB` target.** The floor is now the
-  .NET runtime and ASP.NET Core/Kestrel hosting, not the model: the trees themselves are
-  only ~18 MB. Getting to single-digit MB would mean a non-.NET host — out of scope.
+- **RSS is still far above the plan's `< 30 MB` target — and the model is a larger share
+  of it than this section first claimed.** Re-measured at the lighter load profile used by
+  the capacity-price subsection (3,000 concurrent warm requests, no `wrk` run) the shipped
+  511-leaf server sits at **123 MB**, vs the 136 MB in the table above, which was read after
+  a 15 s `wrk` run; both are the same binary and the ~90 MB floor is load-independent. The
+  host floor is ~90 MB, and on
+  top of that the tree table costs **~1.86 MB of RSS per MB of `model.bin`**, not the ~1×
+  implied by "the trees are only 18 MB" (measured at four capacities; see the capacity-price
+  subsection above). The extra factor is `TreeEnsembleModel.Load` calling
+  `File.ReadAllBytes`: the 18 MB file lands on the Large Object Heap as a *second*, full-size
+  copy of a table that is then parsed into ~18 MB of typed node arrays, and that buffer stays
+  resident until a gen2 collection. So capacity is not weakly coupled to RSS, it is a strong
+  linear term. Getting to single-digit MB still requires a non-.NET host — out of scope —
+  but streaming the load straight into the final arrays is an untaken ~15–18 MB that costs
+  no accuracy (not measured here; the loader change was scoped out).
 - **`model.bin` is a new tracked 18 MB artifact.** It is derived deterministically from
   `model.onnx` (`uv run python/export_binary.py`), which remains tracked as the source of
   truth.
@@ -371,6 +384,64 @@ columns are distance MedAPE (`<1km … >25km`).
   short-trip tail we just up-weighted. `min_child_samples=10` is neutral.
 - **E9**: pruning to 150 or 60 trees always costs accuracy; there is no free
   size/latency win by dropping trees.
+
+### E7 — the capacity price: accuracy bought, memory paid (measured 2026-09-20)
+
+E7 above adopted 511 leaves on the evidence that capacity keeps helping, but the
+results log's baseline row also differs in *data* (it predates E1/E5), so it never
+isolated what the extra leaves cost or bought. This run does: **`num_leaves` is the only
+variable.** Protocol is the same as `experiments/try_s1_fair.py` — train on
+`samples.parquet` + 80% of `offnetwork.parquet` with E1 inverse-frequency weights, 400
+trees, fixed seed, and score on the unseen 20% (31,761 raw-coordinate pairs, i.e. what
+the API is actually handed). Script: `experiments/scratch/price_capacity.py`.
+
+| `num_leaves` | nodes/target | distance MedAPE | distance MAE | duration MedAPE | duration MAE | fit s |
+|---|---|---|---|---|---|---|
+| 63 | 50,000 | 4.51% | 1,822 m | 4.41% | 114 s | 36 |
+| 127 | 101,200 | 3.84% | 1,564 m | 3.63% | 95 s | 46 |
+| 255 | 203,600 | 3.15% | 1,322 m | 2.98% | 80 s | 67 |
+| **511** | 408,400 | **2.62%** | **1,145 m** | **2.42%** | **66 s** | 78 |
+
+The 511 row reproduces the independently published `try_s1_fair.py` figure (2.6% /
+2.4%, MAE 1,140 m / 66 s), which is a useful cross-check that both harnesses score the
+same thing. Note the curve is **saturating**: 63 → 255 leaves buys 1.36 MedAPE points
+for +6.8 MB of artifact, while 255 → 511 buys only 0.53 points for +9.0 MB.
+
+Memory for the same four capacities, measured the E11 way (3,000 concurrent warm
+requests, then `/proc/<pid>/smaps_rollup`, median of 3 runs; `MODEL_PATH` swapped on a
+single build so the runtime is byte-identical). Rows marked † are size-matched synthetic
+tables (`experiments/scratch/make_sized_model.py`) — same node count, so the loader
+allocates identically — verified against the two real artifacts at the endpoints
+(63: real 93.5 MB RSS / 71.7 Pss vs synthetic 93.6 / 71.7; 511: real 123.3 / 101.3 vs
+synthetic 123.0 / 101.1).
+
+| `num_leaves` | `model.bin` | Pss | RSS | VmHWM | model cost over floor |
+|---|---|---|---|---|---|
+| 63 | 2.20 MB | 71.7 MB | 93.6 MB | 91.2 MB | 4.1 MB |
+| 127 † | 4.46 MB | 75.4 MB | 97.3 MB | 95.1 MB | 7.8 MB |
+| 255 † | 8.96 MB | 83.9 MB | 105.8 MB | 103.4 MB | 16.3 MB |
+| **511** | 17.97 MB | 101.1 MB | 123.0 MB | 120.7 MB | 33.5 MB |
+
+Fitted across all four points, **RSS ≈ 89.5 MB + 1.86 × `model.bin` MB** (residual
+< 0.5 MB; the per-step ratios are 1.6–1.9×). That is the number E11 did not have: see
+the correction in its costs below.
+
+**Verdict — the 511-leaf capacity is justified, but it is the most expensive accuracy in
+the model.** 8.17× more artifact (2.20 → 17.97 MB) buys 1.72× better distance MedAPE and
+1.82× better duration, and removes 677 m / 48 s of MAE per pair; the price is **+29.4 MB
+RSS** (93.6 → 123.0 MB). The saturating shape means 255 leaves is the interesting
+fallback if memory ever binds more tightly than accuracy (+16.3 MB instead of +33.5 MB for
+3.15% / 2.98%). Note that dropping to 63 leaves still leaves the box at 93.6 MB — **3×
+over the plan's `< 30 MB` target** — so capacity is a poor lever for the footprint goal
+and a good lever for accuracy.
+
+Two caveats. First, this is the *capacity-only* price; the two artifacts actually
+shipped also differ in data (E1/E5), and measuring the as-shipped pair on fresh
+OSRM-labelled pairs puts the real-world gap wider (13.5% → 9.5% distance MedAPE, and
+`< 1 km` 227% → 66%; `experiments/scratch/version_bakeoff.py`). Second, the shipped
+63-leaf artifact predates E5, so off-network coordinates are out-of-distribution for it —
+faithful to what it would do in production, but not a clean ablation, which is why the
+controlled rows above are the ones to quote.
 
 ### E5 — off-network training data (separate harness)
 

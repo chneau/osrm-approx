@@ -1,0 +1,41 @@
+[
+  {
+    "label": "shipped-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 101.1,
+    "Rss_mb": 123.1,
+    "Private_Dirty_mb": 71.8,
+    "Anonymous_mb": 59.8,
+    "VmRSS_mb": 120.9,
+    "VmHWM_mb": 120.9
+  },
+  {
+    "label": "shipped-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 101.3,
+    "Rss_mb": 123.4,
+    "Private_Dirty_mb": 71.9,
+    "Anonymous_mb": 59.9,
+    "VmRSS_mb": 120.8,
+    "VmHWM_mb": 120.8
+  },
+  {
+    "label": "shipped-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 101.4,
+    "Rss_mb": 123.5,
+    "Private_Dirty_mb": 71.9,
+    "Anonymous_mb": 59.9,
+    "VmRSS_mb": 121.6,
+    "VmHWM_mb": 121.6
+  }
+]

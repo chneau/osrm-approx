@@ -1,0 +1,41 @@
+[
+  {
+    "label": "L255-sized",
+    "model": "experiments/scratch/model_sized_255leaf.bin",
+    "artifact_mb": 8.96,
+    "loaded": "model_sized_255leaf.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 84.1,
+    "Rss_mb": 106.0,
+    "Private_Dirty_mb": 54.7,
+    "Anonymous_mb": 42.7,
+    "VmRSS_mb": 103.5,
+    "VmHWM_mb": 103.5
+  },
+  {
+    "label": "L255-sized",
+    "model": "experiments/scratch/model_sized_255leaf.bin",
+    "artifact_mb": 8.96,
+    "loaded": "model_sized_255leaf.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 84.0,
+    "Rss_mb": 105.7,
+    "Private_Dirty_mb": 54.8,
+    "Anonymous_mb": 42.8,
+    "VmRSS_mb": 102.9,
+    "VmHWM_mb": 102.9
+  },
+  {
+    "label": "L255-sized",
+    "model": "experiments/scratch/model_sized_255leaf.bin",
+    "artifact_mb": 8.96,
+    "loaded": "model_sized_255leaf.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 83.7,
+    "Rss_mb": 105.8,
+    "Private_Dirty_mb": 54.4,
+    "Anonymous_mb": 42.4,
+    "VmRSS_mb": 103.7,
+    "VmHWM_mb": 103.7
+  }
+]
