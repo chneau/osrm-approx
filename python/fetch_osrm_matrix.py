@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import threading
 import time
@@ -113,6 +114,39 @@ class OsrmClient:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             return list(pool.map(one, range(len(lats))))
 
+    def nearest_distance(self, lats, lons, workers: int = 16, chunk: int = 200_000) -> np.ndarray:
+        """Snap points and return just the snap distance, in memory-bounded chunks.
+
+        ``nearest`` keeps a Python dict per point, which does not scale to the
+        millions of points a fine grid can produce; this variant returns a flat
+        float array and never holds more than ``chunk`` results at a time.
+        """
+        lats = np.asarray(lats)
+        lons = np.asarray(lons)
+        out = np.empty(len(lats), dtype=np.float64)
+
+        def one(i: int) -> float:
+            url = f"{self.base_url}/nearest/v1/driving/{lons[i]:.6f},{lats[i]:.6f}?number=1"
+            last: Exception | None = None
+            for attempt in range(self.retries):
+                try:
+                    r = self._session().get(url, timeout=self.timeout)
+                    r.raise_for_status()
+                    data = r.json()
+                    if data.get("code") != "Ok":
+                        raise RuntimeError(f"{data.get('code')}: {data.get('message')}")
+                    return float(data["waypoints"][0]["distance"])
+                except Exception as exc:  # noqa: BLE001 - retried below
+                    last = exc
+                    time.sleep(0.3 * (attempt + 1))
+            raise RuntimeError(f"/nearest failed for point {i} ({lats[i]},{lons[i]}): {last}")
+
+        for start in range(0, len(lats), chunk):
+            end = min(start + chunk, len(lats))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                out[start:end] = list(pool.map(one, range(start, end)))
+        return out
+
     def table(self, sources_lat, sources_lon, dests_lat, dests_lon, _depth: int = 0) -> tuple[np.ndarray, np.ndarray]:
         """Return (duration_s, distance_m) matrices of shape (len(sources), len(dests)).
 
@@ -165,6 +199,10 @@ def main() -> int:
     ap.add_argument("--include-self", action="store_true", help="keep A->A pairs (all zeros)")
     ap.add_argument("--probe-a", default=None, help="'lat,lon' sanity-probe origin (default: most-separated grid point)")
     ap.add_argument("--probe-b", default=None, help="'lat,lon' sanity-probe destination (default: most-separated grid point)")
+    ap.add_argument("--max-pairs", type=int, default=0,
+                    help="0 = every ordered pair; >0 samples this many random pairs (needed for large grids "
+                         "where N^2 is intractable)")
+    ap.add_argument("--pair-seed", type=int, default=42)
     args = ap.parse_args()
 
     grid = pd.read_parquet(args.grid)
@@ -178,12 +216,11 @@ def main() -> int:
     # Points far from any road snap to a distant boundary edge; keeping them
     # would inject degenerate 0 m / 0 s pairs into the training set.
     try:
-        waypoints = client.nearest(lat, lon)
+        snap_m = client.nearest_distance(lat, lon)
     except Exception as exc:  # noqa: BLE001
         print(f"[matrix] FATAL: cannot reach OSRM at {args.url}: {exc}", file=sys.stderr)
         return 1
 
-    snap_m = np.array([float(w["distance"]) for w in waypoints])
     keep = snap_m <= args.max_snap_m
     if not keep.all():
         print(
@@ -247,31 +284,43 @@ def main() -> int:
     # blocks amortise the per-destination cost).
     src_chunk = max(1, min(args.max_coords // 2, args.max_coords - 1))
     dst_chunk = args.max_coords - src_chunk
-    n_requests = ((n + src_chunk - 1) // src_chunk) * ((n + dst_chunk - 1) // dst_chunk)
-    print(f"[matrix] chunking: {src_chunk} sources x {dst_chunk} destinations -> ~{n_requests} requests")
+    random_mode = bool(args.max_pairs and args.max_pairs > 0)
+    rng = np.random.default_rng(args.pair_seed)
+    if random_mode:
+        per_block = src_chunk * dst_chunk
+        n_requests = max(1, math.ceil(args.max_pairs / per_block))
+        print(f"[matrix] random sampling: target {args.max_pairs:,} pairs -> ~{n_requests} blocks of {per_block:,}")
+    else:
+        n_requests = ((n + src_chunk - 1) // src_chunk) * ((n + dst_chunk - 1) // dst_chunk)
+        print(f"[matrix] all-pairs chunking: {src_chunk} sources x {dst_chunk} destinations -> ~{n_requests} requests")
+
+    def _iter_blocks():
+        if random_mode:
+            for _ in range(n_requests):
+                yield (rng.choice(n, size=min(src_chunk, n), replace=False),
+                       rng.choice(n, size=min(dst_chunk, n), replace=False))
+        else:
+            for s0 in range(0, n, src_chunk):
+                s1 = min(s0 + src_chunk, n)
+                for t0 in range(0, n, dst_chunk):
+                    t1 = min(t0 + dst_chunk, n)
+                    yield np.arange(s0, s1), np.arange(t0, t1)
 
     o_lat, o_lon, d_lat, d_lon = [], [], [], []
     dur_all, dist_all = [], []
-    done = 0
     started = time.time()
 
-    for s0 in range(0, n, src_chunk):
-        s1 = min(s0 + src_chunk, n)
-        sl, so = lat[s0:s1], lon[s0:s1]
-        for t0 in range(0, n, dst_chunk):
-            t1 = min(t0 + dst_chunk, n)
-            dur, dist = client.table(sl, so, lat[t0:t1], lon[t0:t1])
+    for block_no, (src_idx, dst_idx) in enumerate(_iter_blocks(), start=1):
+        sl, so = lat[src_idx], lon[src_idx]
+        tl, to = lat[dst_idx], lon[dst_idx]
+        dur, dist = client.table(sl, so, tl, to)
 
-            # Sub-metre pairs are points that snapped onto the same edge position.
-            ok = np.isfinite(dur) & np.isfinite(dist) & (dist >= 1.0) & (dur > 0.0)
-            if not args.include_self and s0 < t1 and t0 < s1:
-                # Drop A->A pairs, comparing *global* grid indices.
-                g_src = s0 + np.arange(s1 - s0)
-                g_dst = t0 + np.arange(t1 - t0)
-                ok &= g_src[:, None] != g_dst[None, :]
-            if not ok.any():
-                continue
-
+        # Sub-metre pairs are points that snapped onto the same edge position.
+        ok = np.isfinite(dur) & np.isfinite(dist) & (dist >= 1.0) & (dur > 0.0)
+        if not args.include_self:
+            # Drop A->A pairs, comparing *global* grid indices.
+            ok &= src_idx[:, None] != dst_idx[None, :]
+        if ok.any():
             rr, cc = np.nonzero(ok)
             # Row/column indices address the source block and destination block
             # directly. Do NOT index a np.repeat()-ed source array here: that
@@ -279,16 +328,16 @@ def main() -> int:
             # origin onto the first source of the chunk.
             o_lat.append(sl[rr])
             o_lon.append(so[rr])
-            d_lat.append(lat[t0:t1][cc])
-            d_lon.append(lon[t0:t1][cc])
+            d_lat.append(tl[cc])
+            d_lon.append(to[cc])
             dur_all.append(dur[ok])
             dist_all.append(dist[ok])
 
-            done += 1
-            if done % 8 == 0 or done == n_requests:
-                elapsed = time.time() - started
-                pct = 100.0 * done / max(n_requests, 1)
-                print(f"[matrix] {done}/{n_requests} requests ({pct:5.1f}%) elapsed={elapsed:6.1f}s")
+        if block_no % 8 == 0 or block_no == n_requests:
+            elapsed = time.time() - started
+            pct = 100.0 * block_no / max(n_requests, 1)
+            kept = sum(len(x) for x in dur_all)
+            print(f"[matrix] {block_no}/{n_requests} blocks ({pct:5.1f}%) kept={kept:,} elapsed={elapsed:6.1f}s")
 
     if not dur_all:
         print("[matrix] FATAL: no routable pairs returned", file=sys.stderr)
@@ -301,24 +350,36 @@ def main() -> int:
     dur_c = np.concatenate(dur_all)
     dist_c = np.concatenate(dist_all)
 
-    # Every grid point appears as an origin and as a destination in a full
-    # all-pairs sweep, so both coordinate sets must cover the whole grid.
-    # This catches row/column index misalignment between the matrix and the
+    # In random mode the last block can overshoot the target; trim uniformly.
+    if random_mode and len(dur_c) > args.max_pairs:
+        keep_idx = rng.choice(len(dur_c), size=args.max_pairs, replace=False)
+        o_lat_c, o_lon_c = o_lat_c[keep_idx], o_lon_c[keep_idx]
+        d_lat_c, d_lon_c = d_lat_c[keep_idx], d_lon_c[keep_idx]
+        dur_c, dist_c = dur_c[keep_idx], dist_c[keep_idx]
+
+    # In a full all-pairs sweep every grid point appears as an origin and as a
+    # destination, so both coordinate sets must cover the whole grid. This
+    # catches row/column index misalignment between the matrix and the
     # coordinates -- a failure mode that otherwise produces plausible-looking
-    # but meaningless labels.
+    # but meaningless labels. Random sampling does not visit every point, so the
+    # check is only meaningful in all-pairs mode.
     def _n_unique_points(la: np.ndarray, lo: np.ndarray) -> int:
         pairs = np.stack([np.round(la.astype(np.float64), 6), np.round(lo.astype(np.float64), 6)], axis=1)
         return len(np.unique(pairs, axis=0))
 
-    n_orig = _n_unique_points(o_lat_c, o_lon_c)
-    n_dest = _n_unique_points(d_lat_c, d_lon_c)
-    if n_orig != n or n_dest != n:
-        print(
-            f"[matrix] FATAL: coordinate misalignment -- {n_orig} distinct origins and "
-            f"{n_dest} distinct destinations for {n} grid points",
-            file=sys.stderr,
-        )
-        return 1
+    if random_mode:
+        print(f"[matrix] random mode: {len(dur_c):,} sampled pairs "
+              f"({_n_unique_points(o_lat_c, o_lon_c):,} origins, {_n_unique_points(d_lat_c, d_lon_c):,} destinations)")
+    else:
+        n_orig = _n_unique_points(o_lat_c, o_lon_c)
+        n_dest = _n_unique_points(d_lat_c, d_lon_c)
+        if n_orig != n or n_dest != n:
+            print(
+                f"[matrix] FATAL: coordinate misalignment -- {n_orig} distinct origins and "
+                f"{n_dest} distinct destinations for {n} grid points",
+                file=sys.stderr,
+            )
+            return 1
 
     samples = pd.DataFrame(
         {

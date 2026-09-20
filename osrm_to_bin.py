@@ -423,7 +423,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--osrm-port", type=int, default=DEFAULT_OSRM_PORT, help="host port for the OSRM container")
     parser.add_argument("--osrm-image", default="osrm/osrm-backend:latest")
 
-    parser.add_argument("--grid-points", type=int, default=3000, help="sampled grid nodes (all-pairs source)")
+    parser.add_argument("--grid-points", type=int, default=None,
+                        help="cap on grid nodes (default: 3000 for the ring grid, uncapped for --grid-spacing-m)")
+    parser.add_argument("--grid-spacing-m", type=float, default=0.0,
+                        help="uniform grid at ~this metric spacing in metres (0 = legacy multi-resolution rings)")
+    parser.add_argument("--max-pairs", type=int, default=0,
+                        help="0 = every ordered pair; >0 samples this many random pairs (needed for large regions)")
     parser.add_argument("--matrix-max-coords", type=int, default=1200, help="sources+destinations per /table request")
     parser.add_argument("--max-snap-m", type=float, default=250.0, help="drop grid points further than this from a road")
     parser.add_argument("--off-points", type=int, default=400, help="random off-network coordinates (0 disables)")
@@ -474,6 +479,8 @@ def main(argv=None) -> int:
         "url": args.pbf_url,
         "bbox_override": list(override) if override else None,
         "grid_points": args.grid_points,
+        "grid_spacing_m": args.grid_spacing_m,
+        "max_pairs": args.max_pairs,
         "max_snap_m": args.max_snap_m,
         "off_points": args.off_points,
     }
@@ -533,11 +540,19 @@ def main(argv=None) -> int:
 
     try:
         if not grid.exists():
-            log("stage: multi-resolution grid")
+            if args.grid_spacing_m and args.grid_spacing_m > 0:
+                log(f"stage: uniform ~{args.grid_spacing_m:g}m grid")
+            else:
+                log("stage: multi-resolution grid")
+            if args.grid_points is None:
+                max_points = 0 if (args.grid_spacing_m and args.grid_spacing_m > 0) else 3000
+            else:
+                max_points = args.grid_points
             call_main(generate_grid, [
                 "--out", str(grid),
-                "--max-points", str(args.grid_points),
+                "--max-points", str(max_points),
                 "--seed", str(args.seed),
+                "--spacing-m", str(args.grid_spacing_m),
                 "--rings", ",".join(f"{r:g}:{step:g}" for r, step in rings),
             ])
 
@@ -549,6 +564,8 @@ def main(argv=None) -> int:
                 "--out", str(samples),
                 "--max-coords", str(args.matrix_max_coords),
                 "--max-snap-m", str(args.max_snap_m),
+                "--max-pairs", str(args.max_pairs),
+                "--pair-seed", str(args.seed),
             ])
             if rc != 0:
                 raise RuntimeError(f"fetch_osrm_matrix failed (exit {rc})")

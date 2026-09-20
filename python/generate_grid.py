@@ -75,28 +75,67 @@ def build_grid(rings) -> pd.DataFrame:
     return df
 
 
+def build_uniform_grid(bbox, spacing_m: float) -> pd.DataFrame:
+    """Regular lat/lon lattice at approximately ``spacing_m`` metres.
+
+    The latitude step is exact; the longitude step is scaled by
+    ``cos(mid-latitude)`` so cells are roughly square in metres. The grid is
+    aligned to multiples of the step inside the bbox, so the same region and
+    spacing always produce the same points.
+    """
+    min_lat, min_lon, max_lat, max_lon = bbox
+    mid_lat = (min_lat + max_lat) / 2.0
+    dlat = spacing_m / 111_320.0
+    dlon = spacing_m / (111_320.0 * math.cos(math.radians(mid_lat)))
+    lat0 = math.ceil(min_lat / dlat) * dlat
+    lon0 = math.ceil(min_lon / dlon) * dlon
+    lats = np.arange(lat0, max_lat + dlat * 1e-6, dlat)
+    lons = np.arange(lon0, max_lon + dlon * 1e-6, dlon)
+    la, lo = np.meshgrid(lats, lons, indexing="ij")
+    df = pd.DataFrame({"lat": np.round(la.ravel(), 6), "lon": np.round(lo.ravel(), 6)})
+    df = df.drop_duplicates(["lat", "lon"]).reset_index(drop=True)
+    df["ring"] = 0
+    return df
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default=str(Path(__file__).resolve().parents[1] / "data" / "processed" / "grid.parquet"))
-    ap.add_argument("--max-points", type=int, default=3000, help="randomly subsample if the grid is larger")
+    ap.add_argument("--max-points", type=int, default=3000,
+                    help="randomly subsample if the grid is larger (0 = no cap)")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--spacing-m", type=float, default=0.0,
+                    help="uniform grid at ~this metric spacing in metres (0 keeps the multi-resolution rings)")
+    ap.add_argument("--bbox", default=None,
+                    help="'min_lat,min_lon,max_lat,max_lon' (defaults to the built-in Greater Manchester region)")
     # (radius_km, step_deg) -- ~250 m core, ~500 m mid, ~1 km fringe.
     ap.add_argument("--rings", default="3:0.0025,10:0.005,40:0.01")
     args = ap.parse_args()
 
-    rings = []
-    for part in args.rings.split(","):
-        radius, step = part.split(":")
-        rings.append((float(radius), float(step)))
+    if args.bbox:
+        vals = [float(v) for v in args.bbox.split(",")]
+        if len(vals) != 4 or not (vals[0] < vals[2] and vals[1] < vals[3]):
+            raise SystemExit("--bbox must be 'min_lat,min_lon,max_lat,max_lon' with min < max")
+        BBOX.update({"min_lat": vals[0], "min_lon": vals[1], "max_lat": vals[2], "max_lon": vals[3]})
 
-    df = build_grid(rings)
-    print(f"[grid] raw points: {len(df)}")
-    for ring_id, (radius, step) in enumerate(rings):
-        n = int((df["ring"] == ring_id).sum())
-        approx_m = step * 111_320
-        print(f"[grid]   ring {ring_id}: radius<{radius:g}km step={approx_m:.0f}m -> {n} points")
+    if args.spacing_m and args.spacing_m > 0:
+        bbox = (BBOX["min_lat"], BBOX["min_lon"], BBOX["max_lat"], BBOX["max_lon"])
+        df = build_uniform_grid(bbox, args.spacing_m)
+        print(f"[grid] uniform ~{args.spacing_m:g}m grid over {bbox} -> {len(df):,} points")
+    else:
+        rings = []
+        for part in args.rings.split(","):
+            radius, step = part.split(":")
+            rings.append((float(radius), float(step)))
 
-    if len(df) > args.max_points:
+        df = build_grid(rings)
+        print(f"[grid] raw points: {len(df)}")
+        for ring_id, (radius, step) in enumerate(rings):
+            n = int((df["ring"] == ring_id).sum())
+            approx_m = step * 111_320
+            print(f"[grid]   ring {ring_id}: radius<{radius:g}km step={approx_m:.0f}m -> {n} points")
+
+    if args.max_points and args.max_points > 0 and len(df) > args.max_points:
         df = df.sample(n=args.max_points, random_state=args.seed).sort_values(["lat", "lon"]).reset_index(drop=True)
         print(f"[grid] subsampled to {len(df)} points")
 

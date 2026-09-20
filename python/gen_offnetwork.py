@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,8 @@ def main() -> int:
     ap.add_argument("--points", type=int, default=400, help="random off-network coordinates")
     ap.add_argument("--block", type=int, default=25, help="origins x destinations per /table block")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--max-snap-m", type=float, default=250.0,
+                    help="drop random points further than this from a road (0 disables)")
     ap.add_argument("--out", default=str(ROOT / "data" / "processed" / "offnetwork.parquet"))
     args = ap.parse_args()
 
@@ -52,13 +55,26 @@ def main() -> int:
 
     client = OsrmClient(args.url)
 
+    # Keep only coordinates OSRM can snap to a nearby road. Without this, a
+    # region whose bbox is mostly sea (e.g. Great Britain) would train on
+    # coordinates that snapped hundreds of kilometres to a coastline edge.
+    if args.max_snap_m and args.max_snap_m > 0:
+        snap_m = client.nearest_distance(lat, lon)
+        keep = snap_m <= args.max_snap_m
+        print(f"[offnet] kept {int(keep.sum())}/{len(lat)} points within {args.max_snap_m:.0f}m of a road")
+        lat, lon = lat[keep], lon[keep]
+        if len(lat) < 2:
+            print("[offnet] FATAL: too few on-network points after the snap filter", file=sys.stderr)
+            return 1
+
     o_lat, o_lon, d_lat, d_lon = [], [], [], []
     dur_all, dist_all = [], []
     blocks = 0
-    for s0 in range(0, args.points, args.block):
-        s1 = min(s0 + args.block, args.points)
-        for t0 in range(0, args.points, args.block):
-            t1 = min(t0 + args.block, args.points)
+    n_points = len(lat)
+    for s0 in range(0, n_points, args.block):
+        s1 = min(s0 + args.block, n_points)
+        for t0 in range(0, n_points, args.block):
+            t1 = min(t0 + args.block, n_points)
             dur, dist = client.table(lat[s0:s1], lon[s0:s1], lat[t0:t1], lon[t0:t1])
             ok = np.isfinite(dur) & np.isfinite(dist) & (dist >= 1.0) & (dur > 0.0)
             # Drop pairs that snapped onto the same edge position (0 m).
