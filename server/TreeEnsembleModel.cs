@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 
 /// <summary>
 /// E11 (see IMPROVEMENTS.md): a tiny, dependency-free interpreter for the
@@ -30,6 +31,11 @@ using System.Buffers.Binary;
 /// per-tree offset once the (feature, threshold, left, right) row is chosen.
 /// Internal nodes use the BRANCH_LEQ mode: <c>x &lt;= threshold</c> takes the left
 /// child (matching ONNX Runtime's TreeEnsembleRegressor semantics).
+/// </remarks>
+/// <remarks>
+/// Loading streams the file rather than reading it whole: each table is read
+/// straight into its final array, so no second, full-size copy of the model is ever
+/// held. See <see cref="Load"/> for why that matters to RSS.
 /// </remarks>
 internal sealed class TreeEnsembleModel
 {
@@ -76,23 +82,31 @@ internal sealed class TreeEnsembleModel
 
     public static TreeEnsembleModel Load(string path)
     {
-        byte[] buffer = File.ReadAllBytes(path);
-        int pos = 0;
+        // Stream the file instead of File.ReadAllBytes. Reading it whole allocated a
+        // byte[] the size of the entire table (up to ~18 MB), on top of the ~18 MB of
+        // typed node arrays it was then parsed into; being large, that buffer went to
+        // the Large Object Heap and stayed resident until a gen2 collection, so the
+        // model cost ~1.9x its file size in RSS. Each array is now read straight into
+        // its final allocation and the transient copy is never created.
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1 << 16, FileOptions.SequentialScan);
 
-        if (buffer.Length < 16 || !buffer.AsSpan(0, 4).SequenceEqual(Magic))
+        Span<byte> magic = stackalloc byte[4];
+        ReadExactly(stream, magic, path);
+        if (!magic.SequenceEqual(Magic))
         {
             throw new InvalidDataException($"'{path}' is not an OSRT tree ensemble (bad magic).");
         }
-        pos = 4;
 
-        uint version = ReadUInt32(buffer, ref pos);
+        uint version = ReadUInt32(stream, path);
         if (version != 1)
         {
             throw new InvalidDataException($"Unsupported model.bin version {version} (expected 1).");
         }
 
-        int featureCount = (int)ReadUInt32(buffer, ref pos);
-        int targetCount = (int)ReadUInt32(buffer, ref pos);
+        int featureCount = (int)ReadUInt32(stream, path);
+        int targetCount = (int)ReadUInt32(stream, path);
 
         var nTrees = new int[targetCount];
         var offsets = new int[targetCount][];
@@ -106,25 +120,25 @@ internal sealed class TreeEnsembleModel
 
         for (int t = 0; t < targetCount; t++)
         {
-            baseValue[t] = ReadSingle(buffer, ref pos);
-            int trees = (int)ReadUInt32(buffer, ref pos);
-            int nodes = (int)ReadUInt32(buffer, ref pos);
+            baseValue[t] = ReadSingle(stream, path);
+            int trees = (int)ReadUInt32(stream, path);
+            int nodes = (int)ReadUInt32(stream, path);
             nTrees[t] = trees;
 
-            offsets[t] = ReadInt32(buffer, ref pos, trees + 1);
-            feature[t] = ReadInt32(buffer, ref pos, nodes);
-            threshold[t] = ReadSingle(buffer, ref pos, nodes);
-            left[t] = ReadInt32(buffer, ref pos, nodes);
-            right[t] = ReadInt32(buffer, ref pos, nodes);
-            value[t] = ReadSingle(buffer, ref pos, nodes);
-            isLeaf[t] = ReadBytes(buffer, ref pos, nodes);
-            _ = ReadBytes(buffer, ref pos, nodes); // default_left: unused (no NaN features)
+            offsets[t] = ReadInt32(stream, path, trees + 1);
+            feature[t] = ReadInt32(stream, path, nodes);
+            threshold[t] = ReadSingle(stream, path, nodes);
+            left[t] = ReadInt32(stream, path, nodes);
+            right[t] = ReadInt32(stream, path, nodes);
+            value[t] = ReadSingle(stream, path, nodes);
+            isLeaf[t] = ReadBytes(stream, path, nodes);
+            SkipBytes(stream, path, nodes); // default_left: unused (no NaN features)
         }
 
-        if (pos != buffer.Length)
+        if (stream.Position != stream.Length)
         {
             throw new InvalidDataException(
-                $"model.bin has {buffer.Length - pos} trailing byte(s); the format is out of sync.");
+                $"model.bin has {stream.Length - stream.Position} trailing byte(s); the format is out of sync.");
         }
 
         return new TreeEnsembleModel(
@@ -166,41 +180,70 @@ internal sealed class TreeEnsembleModel
         }
     }
 
-    private static uint ReadUInt32(byte[] buffer, ref int pos)
+    /// <summary>
+    /// Fills <paramref name="destination"/> completely, or throws. A short read means a
+    /// truncated file, which the old whole-file <c>File.ReadAllBytes</c> path could not
+    /// distinguish from a valid smaller model.
+    /// </summary>
+    private static void ReadExactly(Stream stream, Span<byte> destination, string path)
     {
-        uint v = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(pos));
-        pos += 4;
-        return v;
+        while (!destination.IsEmpty)
+        {
+            int read = stream.Read(destination);
+            if (read <= 0)
+            {
+                throw new InvalidDataException($"'{path}' is truncated; the model is incomplete.");
+            }
+            destination = destination[read..];
+        }
     }
 
-    private static float ReadSingle(byte[] buffer, ref int pos)
+    /// <summary>Consumes <paramref name="count"/> bytes without allocating an array.</summary>
+    private static void SkipBytes(Stream stream, string path, int count)
     {
-        float v = BinaryPrimitives.ReadSingleLittleEndian(buffer.AsSpan(pos));
-        pos += 4;
-        return v;
+        Span<byte> scratch = stackalloc byte[256];
+        while (count > 0)
+        {
+            int chunk = Math.Min(count, scratch.Length);
+            ReadExactly(stream, scratch[..chunk], path);
+            count -= chunk;
+        }
     }
 
-    private static int[] ReadInt32(byte[] buffer, ref int pos, int count)
+    private static uint ReadUInt32(Stream stream, string path)
+    {
+        Span<byte> bytes = stackalloc byte[4];
+        ReadExactly(stream, bytes, path);
+        return BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+    }
+
+    private static float ReadSingle(Stream stream, string path)
+    {
+        Span<byte> bytes = stackalloc byte[4];
+        ReadExactly(stream, bytes, path);
+        return BinaryPrimitives.ReadSingleLittleEndian(bytes);
+    }
+
+    // The bulk readers go straight into the final typed array, so the only copy of the
+    // table is the one the interpreter actually walks. Little-endian, as the format is.
+    private static int[] ReadInt32(Stream stream, string path, int count)
     {
         var array = new int[count];
-        Buffer.BlockCopy(buffer, pos, array, 0, count * sizeof(int));
-        pos += count * sizeof(int);
+        ReadExactly(stream, MemoryMarshal.AsBytes(array.AsSpan()), path);
         return array;
     }
 
-    private static float[] ReadSingle(byte[] buffer, ref int pos, int count)
+    private static float[] ReadSingle(Stream stream, string path, int count)
     {
         var array = new float[count];
-        Buffer.BlockCopy(buffer, pos, array, 0, count * sizeof(float));
-        pos += count * sizeof(float);
+        ReadExactly(stream, MemoryMarshal.AsBytes(array.AsSpan()), path);
         return array;
     }
 
-    private static byte[] ReadBytes(byte[] buffer, ref int pos, int count)
+    private static byte[] ReadBytes(Stream stream, string path, int count)
     {
         var array = new byte[count];
-        Buffer.BlockCopy(buffer, pos, array, 0, count);
-        pos += count;
+        ReadExactly(stream, array, path);
         return array;
     }
 }

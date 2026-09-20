@@ -117,6 +117,13 @@ def run_once(label: str, model: Path, port: int, warm_n: int, seed: int, concurr
             raise SystemExit(f"server for '{label}' never became healthy")
         pid = proc.pid
         health = get(f"{base}/health") or {}
+
+        # Cold reading: taken as soon as the model is loaded and before a single
+        # request, so it reflects the load path itself. The warm reading below includes
+        # whatever the GC chose to keep committed during warm-up, which can mask it.
+        time.sleep(0.5)
+        cold = {**smaps_rollup(pid), **status_fields(pid)}
+
         served = warm(base, warm_n, seed, concurrency)
         time.sleep(2.0)  # let the GC settle so we read steady state, not warm-up
 
@@ -135,6 +142,8 @@ def run_once(label: str, model: Path, port: int, warm_n: int, seed: int, concurr
             "artifact_mb": round(model.stat().st_size / 1e6, 2),
             "loaded": health.get("model"),
             "warm_requests_ok": served,
+            "cold_Rss_mb": round(cold.get("Rss", 0.0), 1),
+            "cold_Pss_mb": round(cold.get("Pss", 0.0), 1),
             "Pss_mb": med("Pss"),
             "Rss_mb": med("Rss"),
             "Private_Dirty_mb": med("Private_Dirty"),

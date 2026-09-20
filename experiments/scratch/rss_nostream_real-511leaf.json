@@ -1,0 +1,41 @@
+[
+  {
+    "label": "real-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 82.5,
+    "Rss_mb": 107.7,
+    "Private_Dirty_mb": 56.2,
+    "Anonymous_mb": 44.1,
+    "VmRSS_mb": 105.6,
+    "VmHWM_mb": 105.6
+  },
+  {
+    "label": "real-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 83.0,
+    "Rss_mb": 108.3,
+    "Private_Dirty_mb": 56.7,
+    "Anonymous_mb": 44.6,
+    "VmRSS_mb": 106.1,
+    "VmHWM_mb": 106.1
+  },
+  {
+    "label": "real-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 82.5,
+    "Rss_mb": 107.8,
+    "Private_Dirty_mb": 56.2,
+    "Anonymous_mb": 44.1,
+    "VmRSS_mb": 105.6,
+    "VmHWM_mb": 105.6
+  }
+]

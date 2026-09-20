@@ -199,17 +199,33 @@ suite still passes.
   of it than this section first claimed.** Re-measured at the lighter load profile used by
   the capacity-price subsection (3,000 concurrent warm requests, no `wrk` run) the shipped
   511-leaf server sits at **123 MB**, vs the 136 MB in the table above, which was read after
-  a 15 s `wrk` run; both are the same binary and the ~90 MB floor is load-independent. The
-  host floor is ~90 MB, and on
+  a 15 s `wrk` run; same binary, different load profile only. The warm host floor is ~90 MB,
+  and on
   top of that the tree table costs **~1.86 MB of RSS per MB of `model.bin`**, not the ~1×
   implied by "the trees are only 18 MB" (measured at four capacities; see the capacity-price
   subsection above). The extra factor is `TreeEnsembleModel.Load` calling
   `File.ReadAllBytes`: the 18 MB file lands on the Large Object Heap as a *second*, full-size
   copy of a table that is then parsed into ~18 MB of typed node arrays, and that buffer stays
   resident until a gen2 collection. So capacity is not weakly coupled to RSS, it is a strong
-  linear term. Getting to single-digit MB still requires a non-.NET host — out of scope —
-  but streaming the load straight into the final arrays is an untaken ~15–18 MB that costs
-  no accuracy (not measured here; the loader change was scoped out).
+  linear term.
+
+  **Fixed.** `Load` now streams `model.bin` through a 64 KiB `FileStream` and reads every
+  table straight into its final array, so the duplicate copy is never created. A/B on the
+  same box in the same session (source swapped, rebuilt, 3 repeats, cold sample taken before
+  any request): the model's cost falls from **1.92× to 1.00×** its file size — 511-leaf cold
+  RSS **104.5 → 87.0 MB** and warm RSS under load **123 → 108 MB**; the 2.2 MB 63-leaf table
+  gains ~3 MB. Predictions are **bit-identical** (same md5 over 400 varied routes) and all 38
+  tests pass. The loader also now *detects* truncation instead of silently accepting a short
+  buffer, which the whole-file read could not distinguish from a smaller valid model.
+
+  One honest wrinkle: at the smallest capacity the *warm* reading rose ~4 MB (93.7 → 98.1)
+  even though cold fell 3 MB. The old whole-file allocation incidentally forced an early gen2
+  collection that compacted start-up garbage, which the streamed load no longer triggers; at
+  2 MB of model there is no big copy to remove, so that trade shows through. It does not touch
+  the shipped model, where removing the 18 MB copy dominates, but it is why this should be
+  measured at the shipped capacity rather than assumed to be a uniform win.
+
+  Getting to single-digit MB still requires a non-.NET host — out of scope.
 - **`model.bin` is a new tracked 18 MB artifact.** It is derived deterministically from
   `model.onnx` (`uv run python/export_binary.py`), which remains tracked as the source of
   truth.

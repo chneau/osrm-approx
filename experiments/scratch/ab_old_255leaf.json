@@ -1,0 +1,28 @@
+[
+  {
+    "label": "A-255leaf",
+    "model": "experiments/scratch/model_sized_255leaf.bin",
+    "artifact_mb": 8.96,
+    "loaded": "model_sized_255leaf.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 75.5,
+    "Rss_mb": 105.9,
+    "Private_Dirty_mb": 54.5,
+    "Anonymous_mb": 42.5,
+    "VmRSS_mb": 103.6,
+    "VmHWM_mb": 103.6
+  },
+  {
+    "label": "A-255leaf",
+    "model": "experiments/scratch/model_sized_255leaf.bin",
+    "artifact_mb": 8.96,
+    "loaded": "model_sized_255leaf.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 75.8,
+    "Rss_mb": 106.0,
+    "Private_Dirty_mb": 54.7,
+    "Anonymous_mb": 42.7,
+    "VmRSS_mb": 103.6,
+    "VmHWM_mb": 103.6
+  }
+]

@@ -1,0 +1,47 @@
+[
+  {
+    "label": "Bs-63leaf",
+    "model": "experiments/scratch/model_small.bin",
+    "artifact_mb": 2.2,
+    "loaded": "model_small.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 71.4,
+    "cold_Pss_mb": 47.0,
+    "Pss_mb": 73.0,
+    "Rss_mb": 98.3,
+    "Private_Dirty_mb": 46.7,
+    "Anonymous_mb": 34.5,
+    "VmRSS_mb": 96.2,
+    "VmHWM_mb": 99.8
+  },
+  {
+    "label": "Bs-63leaf",
+    "model": "experiments/scratch/model_small.bin",
+    "artifact_mb": 2.2,
+    "loaded": "model_small.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 71.1,
+    "cold_Pss_mb": 46.8,
+    "Pss_mb": 72.8,
+    "Rss_mb": 98.0,
+    "Private_Dirty_mb": 46.6,
+    "Anonymous_mb": 34.5,
+    "VmRSS_mb": 96.3,
+    "VmHWM_mb": 100.0
+  },
+  {
+    "label": "Bs-63leaf",
+    "model": "experiments/scratch/model_small.bin",
+    "artifact_mb": 2.2,
+    "loaded": "model_small.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 71.2,
+    "cold_Pss_mb": 46.9,
+    "Pss_mb": 73.1,
+    "Rss_mb": 98.4,
+    "Private_Dirty_mb": 46.8,
+    "Anonymous_mb": 34.6,
+    "VmRSS_mb": 96.1,
+    "VmHWM_mb": 99.8
+  }
+]

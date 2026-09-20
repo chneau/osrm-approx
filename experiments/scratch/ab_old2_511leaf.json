@@ -1,0 +1,47 @@
+[
+  {
+    "label": "As-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 104.4,
+    "cold_Pss_mb": 75.2,
+    "Pss_mb": 93.2,
+    "Rss_mb": 123.4,
+    "Private_Dirty_mb": 72.0,
+    "Anonymous_mb": 60.0,
+    "VmRSS_mb": 121.2,
+    "VmHWM_mb": 121.2
+  },
+  {
+    "label": "As-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 104.5,
+    "cold_Pss_mb": 75.1,
+    "Pss_mb": 93.3,
+    "Rss_mb": 123.7,
+    "Private_Dirty_mb": 72.1,
+    "Anonymous_mb": 60.0,
+    "VmRSS_mb": 122.0,
+    "VmHWM_mb": 122.0
+  },
+  {
+    "label": "As-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 104.5,
+    "cold_Pss_mb": 75.2,
+    "Pss_mb": 93.4,
+    "Rss_mb": 123.7,
+    "Private_Dirty_mb": 72.2,
+    "Anonymous_mb": 60.1,
+    "VmRSS_mb": 121.4,
+    "VmHWM_mb": 121.4
+  }
+]

@@ -1,0 +1,28 @@
+[
+  {
+    "label": "A-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 93.2,
+    "Rss_mb": 123.5,
+    "Private_Dirty_mb": 72.1,
+    "Anonymous_mb": 60.0,
+    "VmRSS_mb": 121.1,
+    "VmHWM_mb": 121.1
+  },
+  {
+    "label": "A-511leaf",
+    "model": "server/models/model.bin",
+    "artifact_mb": 17.97,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 93.1,
+    "Rss_mb": 123.5,
+    "Private_Dirty_mb": 72.0,
+    "Anonymous_mb": 59.9,
+    "VmRSS_mb": 121.2,
+    "VmHWM_mb": 121.2
+  }
+]

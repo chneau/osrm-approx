@@ -1,0 +1,28 @@
+[
+  {
+    "label": "A-127leaf",
+    "model": "experiments/scratch/model_sized_127leaf.bin",
+    "artifact_mb": 4.46,
+    "loaded": "model_sized_127leaf.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 67.4,
+    "Rss_mb": 97.7,
+    "Private_Dirty_mb": 46.2,
+    "Anonymous_mb": 34.2,
+    "VmRSS_mb": 95.4,
+    "VmHWM_mb": 95.4
+  },
+  {
+    "label": "A-127leaf",
+    "model": "experiments/scratch/model_sized_127leaf.bin",
+    "artifact_mb": 4.46,
+    "loaded": "model_sized_127leaf.bin",
+    "warm_requests_ok": 3000,
+    "Pss_mb": 67.0,
+    "Rss_mb": 97.4,
+    "Private_Dirty_mb": 45.8,
+    "Anonymous_mb": 33.8,
+    "VmRSS_mb": 95.4,
+    "VmHWM_mb": 95.4
+  }
+]
