@@ -12,6 +12,12 @@ correctness fix (float32 threshold rounding) found while shipping a larger model
 compiles the trees to C# and drops ONNX Runtime entirely — the first change that moves
 server RSS (428 → 136 MB).**
 
+Two follow-up experiments (**Experiment 0**, the exact OSRM snap; **Experiment 1**,
+static connectivity/detour rasters) then attacked the raw-coordinate short-trip error
+directly. Both are documented below and both were **rejected**: together they move the
+off-network short-trip MedAPE from ~39% to ~34% and stop, so the residual is genuine
+topology, not snap or barrier geometry. The shipped model is unchanged by them.
+
 ## Evidence: why the model originally failed at short range
 
 Two independent measurements point at the same root cause.
@@ -76,6 +82,8 @@ sets the ceiling on feature engineering alone.
 | E9 | Tree pruning (400 → N trees) | Size/latency vs accuracy trade | **done — pruning costs accuracy** |
 | E10 | Quantise the ONNX trees (`int8`/`float16`) | Shrink the 32 MB model → RSS | **done — impossible with stock ORT, reverted** |
 | E11 | Compile the trees to C# (drop ONNX Runtime) | The only lever that moves RSS | **done — big win, adopted** |
+| Exp 0 | Oracle snap (exact OSRM `/nearest` per endpoint) | Snapping is the short-trip bottleneck | **done — real but small, rejected** |
+| Exp 1 | Static connectivity/detour rasters | The residual is barrier-forced detour | **done — marginal, rejected** |
 
 ### Notes on each
 
@@ -195,6 +203,110 @@ suite still passes.
 - **`wrk` throughput did not improve** (40.6k vs 44.5k req/s); the win is RSS and
   per-request latency, not client-bound RPS.
 
+
+## Experiment 0 — oracle snap: is snapping the short-trip bottleneck?
+
+The model is asked to do two jobs at once: snap raw coordinates onto the network, and
+route between them. E5 showed off-network data helps a lot, which raises the question
+of whether the *residual* off-network error is snap uncertainty (fixable with a
+snapper) or something else.
+
+Experiment 0 gives the model the **exact** snap OSRM itself uses — `snap_endpoints.py`
+calls `/nearest` once per unique endpoint at build time, so at inference the model
+knows precisely where OSRM would have put each point. That is the ceiling any snapper
+could reach. `experiment_oracle_snap.py` then trains two feature sets on the identical
+split (fixed balanced test set, seeds 42/43/44 vary training only):
+
+- `raw` — the shipped 8 base features;
+- `oracle_snap` — base + exact snap displacement (east/north) at both ends + the
+  snapped-point separation and bearing (16 features).
+
+Primary test set is the off-network-short set (raw coordinates — the API's real input,
+N≈2.8k); a balanced grid set is the control.
+
+| test | features | dist MedAPE | dur MedAPE |
+|---|---|---|---|
+| off-short | `raw` | 38.9% | 38.3% |
+| off-short | `oracle_snap` | **35.8%** | **34.1%** |
+| grid | `raw` | 5.19% | 3.68% |
+| grid | `oracle_snap` | 5.18% | 3.50% |
+
+**Verdict: snapping is real but small — it is not the gap.** The exact snap cuts
+off-network short-trip error by ~10% relative (≈3–4 MedAPE points), and leaves
+~34–36% — about **7× worse** than the on-network grid set. The grid set is unchanged
+(those points are already on the network, so snap ≈ 0). One honest wrinkle: on the
+off-short `< 1 km` *distance* bucket the exact snap is slightly *worse* (77% → 93%
+MedAPE) — revealing the true snapped separation sharpens the denominator of a
+sub-kilometre relative error. Conclusion: **do not build a snapper** — the ceiling it
+could reach is ~4 points, not the 30-point gap.
+
+## Experiment 1 — connectivity / detour features
+
+If snap is not the residual, the remaining candidate is detour: two raw points that are
+close in a straight line can be far apart by road when a river, canal, railway or
+motorway forces a detour. Those barriers are static geometry, so they can be revealed
+with O(1) raster lookups.
+
+`build_connectivity_raster.py` parses the OSM extract once (pyosmium) into a ~111 m
+raster: nearest-road class per cell, water / rail / motorway barrier masks, and a
+distance transform to the nearest barrier. `experiment_connectivity.py` adds, per pair:
+endpoint road classes, endpoint barrier distances, barrier *crossings* along the
+straight segment (water / rail / motorway runs), and road coverage on the segment
+(fraction on-road, longest off-road gap in metres, #runs). Four feature sets, same
+split and seeds (a second, independent run from Experiment 0's file — LightGBM
+multi-thread training makes the two differ by < 1 point on every cell):
+
+| test | features | dist MedAPE | dur MedAPE | grid dist | grid dur |
+|---|---|---|---|---|---|
+| off-short | `raw` | 39.1% | 38.6% | 5.2% | 3.7% |
+| off-short | `conn` | 38.3% | 36.0% | 5.4% | 3.9% |
+| off-short | `oracle_snap` | 35.5% | 34.6% | 5.2% | 3.5% |
+| off-short | `oracle_snap_conn` | **34.0%** | **33.2%** | 5.2% | 3.6% |
+
+The model-independent diagnostic agrees: within the off-short set, low straight-line
+road coverage predicts high detour (the `road frac` → `med detour` table printed by the
+script), so the feature is carrying real signal — just not much of it.
+
+**Verdict: connectivity adds ~1–2 points on top of snap, and slightly *hurts* the grid
+set** (distance 5.2% → 5.4% for `conn`). Stacked on the exact snap it reaches ~33–34%
+— still ~8× the on-network level. Confirmed negative for shipping: no feature-contract
+change, model unchanged.
+
+### Why the gap does not close
+
+Neither the exact snap (Exp 0) nor static barrier geometry (Exp 1) explains the
+raw-coordinate short-trip error. Together they move it 39% → 34% (≈13% relative) and
+stop there. The residual is genuine route choice and network topology — one-way
+systems, turn restrictions, river crossings with few bridges — which is exactly the
+discontinuous structure a smooth coordinate-plus-static-raster model cannot encode.
+This falsifies the earlier README claim that the residual is "largely the snapping
+floor": snapping accounts for ~4 of ~34 points.
+
+### Negative sub-result: up-weighting off-network rows
+
+`--off-boost` multiplies the sample weight of off-network rows (they are ~0.1% of the
+pool). Since E1 already up-weights short trips, this double-weights them and only ever
+hurts the off-short test, monotonically:
+
+| off-boost | off-short dist | off-short dur | grid dist |
+|---|---|---|---|
+| 1 (none) | 38.8% | 37.8% | 5.17% |
+| 25 | 40.7% | 39.5% | 5.22% |
+| 100 | 44.7% | 41.3% | 5.29% |
+| 400 | 48.4% | 43.1% | 5.69% |
+
+**Rejected.** The default stays at 1.0.
+
+### Cost
+
+The full 4-set × 3-seed connectivity sweep is ~1,135 s; the 2-set × 3-seed oracle run
+is ~378 s. The original harness rebuilt the feature matrix inside the seed loop, so
+even though the split is fixed and the matrix is seed-independent it was materialised
+3× per (kind, dataset). Both scripts now build `X` **once per kind** and reuse it across
+seeds (and `--quick` gives a one-seed `raw`+`conn` run to check whether a feature moves
+at all before paying for the full sweep). The one-off raster build
+(`build_connectivity_raster.py`, osmium parse of the 51 MB PBF + distance transform) is
+minutes on first run. Neither was needed to reach the verdict above.
 
 ## Export correctness fix (found while shipping E7)
 
@@ -333,5 +445,9 @@ uv run experiments.py --train-rows 2000000 --test-per-bucket 4000 --threads 16  
 ./experiment_e5.py --leaves 127 --estimators 200 --train-rows 1500000            # E5
 uv run --with osmium build_road_density.py                                       # E4 raster
 uv run gen_offnetwork.py --points 400                                            # E5 data
+uv run snap_endpoints.py --url http://localhost:5001                             # Exp 0 data (needs live OSRM)
+uv run experiment_oracle_snap.py --seeds 42 43 44                                # Exp 0
+uv run build_connectivity_raster.py                                              # Exp 1 raster (needs the PBF)
+uv run experiment_connectivity.py --seeds 42 43 44                               # Exp 1
 uv run train_export_onnx.py --threads 16                                         # ship
 ```

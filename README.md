@@ -215,8 +215,11 @@ These numbers are already the *improved* model. `IMPROVEMENTS.md` documents the 
 original 63-leaf model had a band-balanced MedAPE of 12.7% / 14.2% and a `< 1 km` bucket of
 **216.9%**; inverse-frequency training weights (E1) removed the implicit ~1 km floor and
 off-network training pairs (E5) roughly halved the error on the raw coordinates the API actually
-receives. What remains is largely the snapping floor, not a modelling gap — the fix there is a
-denser core grid (100–250 m), not more trees.
+receives. Two follow-up experiments asked whether the remaining short-trip error is *snapping*
+(give the model the exact OSRM snap) or *barrier-forced detour* (static river/rail/motorway
+rasters). Both are rejected on measurement: together they move off-network short-trip MedAPE from
+~39% to ~34% and stop. The residual is genuine route-choice / network topology, not a modelling gap
+that a better snapper or more features could close — see `IMPROVEMENTS.md` (Experiment 0 / 1).
 
 ### Latency
 
@@ -321,12 +324,16 @@ error grows where the road network is not locally uniform. Medium-range trips ac
 city, where the network offers several distinct corridors, are the hardest case. Accuracy
 numbers are reported honestly in the benchmark output.
 
-Sub-kilometre trips from *raw* coordinates are the weakest point, and largely for a reason no
-coordinate model can fix: a random point hundreds of metres from a road is first snapped onto
-the network, and that snap distance is a large fraction of a short trip. Training on
-off-network pairs (`IMPROVEMENTS.md` E5) halved the error there but cannot remove it.
+Sub-kilometre trips from *raw* coordinates are the weakest point, and for a reason no coordinate
+model can fix. Training on off-network pairs (`IMPROVEMENTS.md` E5) halved the error there but
+cannot remove it. Two experiments tested the obvious explanations and both failed to close the
+gap: handing the model the **exact** OSRM snap (Experiment 0) cuts off-network short-trip MedAPE
+only 38.9% → 35.8% (distance) / 38.3% → 34.1% (duration), and adding static connectivity/detour
+rasters (Experiment 1) reaches ~34% — still ~8× the on-network level. The residual is genuine
+route-choice / topology error, not snap uncertainty or barrier geometry.
 
-`IMPROVEMENTS.md` is the honest record of what worked and what did not: two adopted changes
-(inverse-frequency weights, off-network data) plus a capacity bump, and four measured
-rejections (log/normalised targets, sin/cos bearing, road-density features, short-range
-specialist), with the RSS/size cost of the adopted configuration stated rather than hidden.
+`IMPROVEMENTS.md` is the honest record of what worked and what did not: three adopted changes
+(inverse-frequency weights, off-network data, compiled-tree serving) plus a capacity bump, and
+six measured rejections — log/normalised targets, sin/cos bearing, road-density features,
+short-range specialist, the exact snap, connectivity rasters — with the RSS/size cost of the
+adopted configuration stated rather than hidden.
