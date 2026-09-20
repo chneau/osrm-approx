@@ -199,28 +199,64 @@ than S1 with similar accuracy — reach for it only if the grid is genuinely irr
 | S5 baseline + residual | small arrays | baseline + small walk | smooth approx | same as today | mid complexity |
 | S6 k-NN | training pairs | KD-tree query | local average | grid-dependent | memory/latency |
 
+## 3b. Measured results (consolidated)
+
+The proposals above were prototyped and measured. All accuracy numbers are on the **same
+held-out raw-coordinate split** (`offnetwork.parquet`, 20% hold-out, N=31,761) unless
+noted; details and methodology are in Appendices A–C.
+
+| method | distance MedAPE | duration MedAPE | artefact | verdict |
+|---|---|---|---|---|
+| GBM (shipped, retrained honestly) | **2.6%** | **2.4%** | 18 MB `model.bin` | baseline |
+| **S1** matrix + nearest/interpolated lookup | **3.4%** | **5.0%** | ~39 MB (`uint16` → 19 MB) | **viable, simpler** |
+| S2b full OSM driving graph (independent router) | 6.2–11.0% | 24–31% | 438k-node graph | rejected |
+| S2 landmark oracle (on-grid, L=512) | 5.1% | — | 9 MB | rejected |
+| S2 hub labels / PLL on proximity graph | 35.2% | 163.9% | 30 MB labels | rejected |
+| S2b major-roads-only OSM | 29.6% (`<1 km` 58.8%) | 52.4% | small graph | rejected |
+
+### Key findings
+
+1. **S1 works** and is the only simplification worth shipping. It needs no training, no
+   ONNX, no custom binary — just the all-pairs matrix and a lattice lookup. It trades a
+   little accuracy (2.6% → 3.4% distance) for a large drop in moving parts.
+2. **Fixed-point encoding:** 24-bit coordinates are unnecessary in S1 (coordinates are
+   `O(N)`, the matrix is `O(N²)`; 24-bit coords save ~13 KB of 39 MB). The real win is
+   `uint16` matrix values with distance in **decametres** + duration in seconds →
+   **38.8 MB → 19.4 MB** at ~2.5 m mean error. A 1 m-precision coordinate fits in **17
+   bits** as a bbox offset (Appendix A).
+3. **S2's oracle machinery is correct and fast** (PLL == scipy, 3.9 s build, ~15 µs
+   queries, 326 labels/node) but a **proximity graph overestimates OSRM by +35%** because
+   summing pairwise shortest paths is only an upper bound. A true S2 needs the actual road
+   graph. A landmark oracle was better (~5%) but still behind S1/GBM (Appendix B).
+4. **A real simplified OSM graph is a different router, not an OSRM approximation.**
+   It ignores turn restrictions (median distance ratio 0.90×), uses a different speed
+   profile (duration 0.70–0.76×) and leaves 4–10% of pairs unreachable. Dropping local
+   roads — the literal "simplification" — raises `< 1 km` distance error from 13% to 59%
+   (Appendix C).
+5. **The learned ensemble wins because it distilled OSRM's outputs** (snapping, turn
+   rules, speed profile), which an independent graph must rediscover, i.e. reimplement
+   OSRM. This is the strongest argument for keeping the ML approach or, if code size is
+   the concern, keeping it while removing the ONNX bridge (S4).
+
 ## 4. Recommendation
 
-| If your binding constraint is… | Pick |
-|---|---|
-| Minimum code / minimum moving parts | **S3** (closed form) or **S1** (matrix + bilinear) |
-| Memory and exactness on short trips | **S2** (hub labels) |
-| Keep current accuracy, shed pipeline risk | **S4** (dump LightGBM directly, delete ONNX) |
-| Best accuracy per byte with simple serving | **S5** (baseline + residual) |
-| "Do we need this at all?" | **S0** (cache OSRM) |
+| If your binding constraint is… | Pick | Measured outcome |
+|---|---|---|
+| Minimum code / minimum moving parts | **S1** (matrix + lookup) | 3.4% / 5.0% — viable |
+| Keep current accuracy, shed pipeline risk | **S4** (dump LightGBM directly, delete ONNX) | keeps 2.6% / 2.4% |
+| Best accuracy per byte with simple serving | **S5** (baseline + residual) | untested, plausible |
+| Exact oracle without traversal | **S2** (hub labels) | needs the real road graph; not competitive as built |
+| "Do we need this at all?" | **S0** (cache OSRM) | exact, 574 MB RSS |
 
-**Suggested first step:** prototype **S1 and S3** against the existing
-`python/experiments.py` / `tests/osrm_vs_onnx.py` harness. They reuse the exact
-ground truth and metrics already trusted, so you get a like-for-like MedAPE (overall and
-per band) for a fraction of the code. If S1 reproduces the tree model's numbers, the
-entire `train_export_onnx.py` + `export_binary.py` + `TreeEnsembleModel.cs` + `model.*`
-stack disappears. If it does not, the gap tells you exactly what the trees are buying.
+**Suggested first step:** ship S1 if a 2.6% → 3.4% distance regression is acceptable — it
+removes `train_export_onnx.py`, `export_binary.py`, `TreeEnsembleModel.cs` and both model
+artefacts (`experiments/try_s1_fair.py` is the measured prototype). Otherwise keep the
+model and do **S4** to delete the ONNX bridge.
 
-One caveat that applies to every option except S2: the current design's hardest problem —
-short **raw-coordinate** trips — is not solved by any of them. Per Experiments 0/1 it is
-probably unsolvable by any coordinate-only method, because it is genuine route-choice and
-network topology. S2 is the only proposal here that stops approximating a discontinuous
-function with a smooth one.
+Caveat: the current design's hardest problem — short **raw-coordinate** trips — is not
+solved by any option here, and the OSM/S2 experiments show why: it is genuine route-choice
+and network topology, not a coordinate-modelling gap. Only an exact road-network router
+(S0, or S2 *with a real graph*) reproduces it.
 
 ---
 

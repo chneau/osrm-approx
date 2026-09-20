@@ -120,6 +120,7 @@ the HTTP client's own overhead dominating the number.
 ├── docker-compose.yml              # OSRM MLD build + serving (offline generation only)
 ├── package.json                    # runner scripts
 ├── IMPROVEMENTS.md                 # model-improvement log (E1–E9), good and bad results
+├── SIMPLIFICATION.md               # design review + measured alternative architectures (S1/S2/OSM)
 ├── data/
 │   ├── raw/                        # greater-manchester.osm.pbf, .osrm* artefacts
 │   └── processed/                  # grid.parquet, samples.parquet, offnetwork.parquet
