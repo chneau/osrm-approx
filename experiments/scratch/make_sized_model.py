@@ -1,8 +1,8 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "numpy>=1.26",
+#   "numpy>=2.5.3",
 # ]
 # ///
 """Write a structurally valid `model.bin` with a target LightGBM leaf count.

@@ -1,4 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "numpy>=2.5.3",
+#   "pandas>=3.0.6",
+#   "scikit-learn>=1.9.1",
+#   "scipy>=1.18.1",
+# ]
+# ///
 """S2 step 2: validate the hub-label oracle and score it against S1/GBM.
 
 - Correctness: random node pairs, PLL query vs scipy shortest path on the same graph.

@@ -1,10 +1,10 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "numpy>=1.26",
-#   "pandas>=2.2",
-#   "pyarrow>=17.0",
+#   "numpy>=2.5.3",
+#   "pandas>=3.0.6",
+#   "pyarrow>=25.0.1",
 # ]
 # ///
 """Multi-resolution grid generator for Greater Manchester.

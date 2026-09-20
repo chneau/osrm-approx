@@ -1,4 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "numpy>=2.5.3",
+#   "requests>=2.34.2",
+#   "scikit-learn>=1.9.1",
+# ]
+# ///
 """S2 step 1: build a sparse road graph at finer-than-training resolution.
 
 Nodes = a multi-resolution grid snapped to OSRM (snap <= max_snap_m). Edges = each

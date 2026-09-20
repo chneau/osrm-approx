@@ -1,14 +1,14 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "numpy>=1.26",
-#   "pandas>=2.2",
-#   "pyarrow>=17.0",
-#   "lightgbm>=4.5",
-#   "scikit-learn>=1.5",
-#   "onnx>=1.16",
-#   "onnxruntime>=1.18",
+#   "lightgbm>=4.7.0",
+#   "numpy>=2.5.3",
+#   "onnx>=1.23.0",
+#   "onnxruntime>=1.30.0",
+#   "pandas>=3.0.6",
+#   "pyarrow>=25.0.1",
+#   "scikit-learn>=1.9.1",
 # ]
 # ///
 """Price the 63 -> 511 leaf capacity bump in accuracy, for the memory it costs.

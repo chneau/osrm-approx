@@ -1,9 +1,9 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "numpy>=1.26",
-#   "onnx>=1.16",
+#   "numpy>=2.5.3",
+#   "onnx>=1.23.0",
 # ]
 # ///
 """E11 (see IMPROVEMENTS.md): compile the ONNX tree ensemble to a compact binary.

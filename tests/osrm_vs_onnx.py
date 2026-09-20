@@ -1,11 +1,11 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "numpy>=1.26",
-#   "pandas>=2.2",
-#   "requests>=2.32",
-#   "scipy>=1.11",
+#   "numpy>=2.5.3",
+#   "pandas>=3.0.6",
+#   "requests>=2.34.2",
+#   "scipy>=1.18.1",
 # ]
 # ///
 """Rigorous accuracy statistics: exact OSRM vs the ONNX approximation service.

@@ -1,12 +1,12 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "numpy>=1.26",
-#   "pandas>=2.2",
-#   "pyarrow>=17.0",
-#   "lightgbm>=4.5",
-#   "scikit-learn>=1.5",
+#   "lightgbm>=4.7.0",
+#   "numpy>=2.5.3",
+#   "pandas>=3.0.6",
+#   "pyarrow>=25.0.1",
+#   "scikit-learn>=1.9.1",
 # ]
 # ///
 """Experiment 1 (connectivity/detour): the residual Experiment 0 left behind.

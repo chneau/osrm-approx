@@ -1,9 +1,9 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "numpy>=1.26",
-#   "osmium>=3.7",
+#   "numpy>=2.5.3",
+#   "osmium>=4.3.1",
 # ]
 # ///
 """E4 (see IMPROVEMENTS.md): static road-density raster from the OSM extract.

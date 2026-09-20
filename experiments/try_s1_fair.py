@@ -1,4 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "lightgbm>=4.7.0",
+#   "numpy>=2.5.3",
+#   "pandas>=3.0.6",
+#   "scikit-learn>=1.9.1",
+# ]
+# ///
 """Fair S1 vs GBM bake-off on raw (off-network) coordinates.
 
 The shipped ONNX model was trained on all of data/processed/offnetwork.parquet, so

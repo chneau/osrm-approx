@@ -1,14 +1,14 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "lightgbm>=4.5",
-#   "numpy>=1.26",
-#   "onnx>=1.16",
-#   "onnxruntime>=1.19",
-#   "pandas>=2.2",
-#   "pyarrow>=17.0",
-#   "scikit-learn>=1.5",
+#   "lightgbm>=4.7.0",
+#   "numpy>=2.5.3",
+#   "onnx>=1.23.0",
+#   "onnxruntime>=1.30.0",
+#   "pandas>=3.0.6",
+#   "pyarrow>=25.0.1",
+#   "scikit-learn>=1.9.1",
 # ]
 # ///
 """Train LightGBM regressors for OSRM distance/duration and export a single ONNX model.

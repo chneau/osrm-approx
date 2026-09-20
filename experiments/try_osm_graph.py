@@ -1,13 +1,13 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "pyrosm>=0.9",
-#   "numpy>=1.26",
-#   "pandas>=2.2",
-#   "pyarrow>=17.0",
-#   "scipy>=1.11",
-#   "scikit-learn>=1.5",
+#   "numpy>=2.5.3",
+#   "pandas>=3.0.6",
+#   "pyarrow>=25.0.1",
+#   "pyrosm>=0.13.1",
+#   "scikit-learn>=1.9.1",
+#   "scipy>=1.18.1",
 # ]
 # ///
 """S2b: can a *real but simplified* OSM driving graph approximate OSRM?

@@ -1,4 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "numpy>=2.5.3",
+#   "onnxruntime>=1.30.0",
+#   "pandas>=3.0.6",
+#   "scikit-learn>=1.9.1",
+# ]
+# ///
 """S1 prototype: ship the all-pairs matrix, interpolate. Plus fixed-point sizing.
 
 Uses the OSRM truth already in data/processed/samples.parquet (the 2,203 routable

@@ -1,10 +1,10 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = [
-#   "numpy>=1.26",
-#   "scipy>=1.11",
-#   "osmium>=3.7",
+#   "numpy>=2.5.3",
+#   "osmium>=4.3.1",
+#   "scipy>=1.18.1",
 # ]
 # ///
 """Experiment 1 support: static *connectivity / detour* rasters from the OSM extract.
