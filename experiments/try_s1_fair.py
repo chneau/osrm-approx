@@ -4,7 +4,10 @@
 # dependencies = [
 #   "lightgbm>=4.7.0",
 #   "numpy>=2.5.3",
+#   "onnx>=1.23.0",
+#   "onnxruntime>=1.30.0",
 #   "pandas>=3.0.6",
+#   "pyarrow>=25.0.1",
 #   "scikit-learn>=1.9.1",
 # ]
 # ///
