@@ -284,3 +284,72 @@ the ~16× needed. This is the structural reason a learned model can beat a store
 Adopt S1 only if the short-trip regression is acceptable; then use `uint16`
 decametre+second matrix values (the real saving) and optional 20/24-bit coordinate offsets.
 If accuracy must hold, prefer **S4** (drop the ONNX bridge) or **S2** (exact oracle).
+
+---
+
+## Appendix B — measured S2 prototype (hub labels / PLL)
+
+Prototypes: `experiments/build_s2_graph.py`, `experiments/pll.c`, `experiments/eval_s2.py`.
+
+### What was built
+
+1. A **multi-resolution node set** (5 km at ~222 m, 5–15 km at ~445 m, 15–40 km at ~890 m)
+   snapped to a live OSRM; 11,699 routable nodes.
+2. A **sparse proximity graph**: each node joined to its `k` nearest nodes, each edge
+   weighted with the *exact* OSRM `/table` distance and duration (so edge weights are not
+   the source of error). 38,905 undirected edges, average degree 6.7.
+3. A **Pruned Landmark Labeling (PLL)** hub-label oracle in C (`experiments/pll.c`):
+   labels built in 3.9 s, avg **326 labels/node**, max 603, **30.5 MB** raw for distance;
+   a query is a two-pointer intersection, **~15 µs** in Python (sub-µs in C), no traversal.
+4. Correctness: PLL matches `scipy` shortest paths on the same graph to **max 0.012 m**.
+
+So the oracle machinery works. The problem is the **graph**.
+
+### Raw-coordinate accuracy (same 20% `offnetwork.parquet` split)
+
+| model | distance MedAPE | distance MAE | duration MedAPE | duration MAE |
+|---|---|---|---|---|
+| GBM (honest) | **2.6%** | **1,140 m** | **2.4%** | **66 s** |
+| S1 grid lookup | 3.4% | 1,945 m | 5.0% | 166 s |
+| **S2 / PLL** | 35.2% | 12,008 m | 163.9% | 3,390 s |
+
+### Why S2 failed here: shortest paths are not concatenations
+
+A graph whose edges are *shortest-path distances between sampled points* systematically
+**overestimates** the true distance. For any path `u=x0..xm=v`, repeated triangle
+inequality gives `Σ d(xi,xi+1) ≥ d(u,v)`; the excess is the grid discretisation error and
+it accumulates along the route. Measured on the exact all-pairs matrix (2,203 nodes,
+`experiments` k-sweep):
+
+| k (neighbours/node) | edges | shortest-path / direct OSRM (median) | MedAPE |
+|---|---|---|---|
+| 4 | 8,804 | 1.58× | 58.1% |
+| 8 | 17,616 | 1.22× | 22.8% |
+| 16 | 35,240 | 1.06× | 11.5% |
+| 32 | 70,488 | 0.99× | 7.8% |
+| 64 | 140,984 | 0.94× | 7.0% |
+
+The fine 11,699-node graph at k=6 shows the same effect (+35% median overestimate).
+Denser graphs converge slowly and never become exact; a *complete* graph would be S1.
+
+### The cheaper dodge: a landmark oracle
+
+`min over L landmarks of d(u,l) + d(l,v)` using exact OSRM distances (no graph): on the
+2,203-node grid, L=64 → MedAPE 6.2%, L=128 → 5.3%, L=512 → 5.1%, at `N×L` storage
+(9 MB at L=512). Better than the proximity graph, still worse than the GBM/S1, and it
+degrades to S1's matrix as L→N.
+
+### Verdict — rejected in this form
+
+Hub labels are fast, compact and *correct*, but their exactness is only as good as the
+graph they run on. A graph of pairwise shortest-path weights is an upper bound that
+diverges, so PLL on a sampled proximity graph cannot match the GBM. **A true S2 needs the
+actual road graph** (road-segment edges, OSRM-consistent weights, one-ways and turn
+restrictions) — i.e. reconstructing the very thing being approximated. That is a large
+effort with a real chance of just re-deriving OSRM, so S2 is rejected unless the goal is
+specifically an exact on-network oracle and the road graph can be imported directly
+(e.g. OSM PBF + a routing library, accepting profile divergence from OSRM).
+
+The reusable positive result: `experiments/pll.c` builds correct hub labels for an
+11.7k-node graph in ~4 s and answers queries in microseconds, so the *oracle* half of S2
+is de-risked if a real road graph ever becomes available.
