@@ -1,0 +1,47 @@
+[
+  {
+    "label": "v2-f32-packed",
+    "model": "server/models/model.bin",
+    "artifact_mb": 13.89,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 83.6,
+    "cold_Pss_mb": 59.3,
+    "Pss_mb": 78.3,
+    "Rss_mb": 103.4,
+    "Private_Dirty_mb": 51.9,
+    "Anonymous_mb": 39.3,
+    "VmRSS_mb": 101.5,
+    "VmHWM_mb": 101.5
+  },
+  {
+    "label": "v2-f32-packed",
+    "model": "server/models/model.bin",
+    "artifact_mb": 13.89,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 83.5,
+    "cold_Pss_mb": 59.3,
+    "Pss_mb": 78.3,
+    "Rss_mb": 103.5,
+    "Private_Dirty_mb": 52.1,
+    "Anonymous_mb": 39.6,
+    "VmRSS_mb": 101.0,
+    "VmHWM_mb": 101.0
+  },
+  {
+    "label": "v2-f32-packed",
+    "model": "server/models/model.bin",
+    "artifact_mb": 13.89,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 83.3,
+    "cold_Pss_mb": 59.1,
+    "Pss_mb": 78.9,
+    "Rss_mb": 104.1,
+    "Private_Dirty_mb": 52.7,
+    "Anonymous_mb": 40.0,
+    "VmRSS_mb": 101.8,
+    "VmHWM_mb": 101.8
+  }
+]

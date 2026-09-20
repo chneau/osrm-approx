@@ -226,11 +226,119 @@ suite still passes.
   measured at the shipped capacity rather than assumed to be a uniform win.
 
   Getting to single-digit MB still requires a non-.NET host — out of scope.
-- **`model.bin` is a new tracked 18 MB artifact.** It is derived deterministically from
-  `model.onnx` (`uv run python/export_binary.py`), which remains tracked as the source of
-  truth.
+- **`model.bin` is a new tracked artifact (13.89 MB after E11b).** It is derived
+  deterministically from `model.onnx` (`uv run python/export_binary.py`), which remains
+  tracked as the source of truth.
 - **`wrk` throughput did not improve** (40.6k vs 44.5k req/s); the win is RSS and
   per-request latency, not client-bound RPS.
+
+## E11b — packed v2 tables: 22 → 17 bytes per node (adopted)
+
+E11's own numbers left the model as the last large, cheap-to-shrink term: after the
+streaming load (see the correction above) RSS tracks the *resident arrays* at ~1.0x the
+artifact, so a narrower `model.bin` is a narrower server. E10 failed to narrow anything
+only because stock ONNX Runtime types its tree kernels on `float` and rejects narrow
+attributes — the interpreter is ours now, so the format can be sized to the data:
+
+- `nodes_featureids` are indices into an 8-wide vector: **`uint8`**, not `int32` (−3 B/node).
+- A leaf is marked by **`left < 0`** (stored as `~row`), so the per-node `is_leaf` byte is
+gone (−1 B/node). The walk tests the sign instead of a flag, so it is not a derived
+  assumption.
+- `default_left` was already read-then-discarded (no NaN features); v2 does not store it.
+
+The export stays a lossless re-serialisation, which is the property the tests lean on:
+
+| format | B/node | `model.bin` | cold RSS | warm RSS | lossless |
+|---|---|---|---|---|---|
+| v1 | 22 | 17.97 MB | 87.0 MB | 108.0 MB | yes |
+| **v2, `--value-encoding f32` (adopted)** | **17** | **13.89 MB** | **83.3 MB** | **104.1 MB** | **yes — bit-identical** |
+| v2, `--value-encoding u16` | 15 | 12.26 MB | 82.4–83.0 MB | 102.3–102.8 MB | no |
+
+**Why u16 was rejected.** Quantising *leaf values only* (leaving every split threshold
+exact, so no input can ever take a different branch than LightGBM would — the E7 failure
+mode) is numerically almost free: over 400 routes it moves the answer by **max 8.2 m /
+0.7 s, mean 2.4 m / 0.24 s**, i.e. ~0.2% of the model's own 1,145 m MAE. But 393 of 400
+routes shift by more than 0.1 m, which **fails the pinned golden-route tests** (the repo's
+0.11 tolerance) and gives up the "model.bin is a deterministic re-serialisation of
+model.onnx" property. That is not a good trade for the **~0.7 MB** it actually returns —
+less than the arithmetic suggests, because LOH allocation granularity absorbs part of it.
+`--value-encoding` stays in the script so the option is one flag away if the golden
+fixtures are ever regenerated for other reasons.
+
+Cumulative effect on the shipped model: **109 → 104 MB warm, 87 → 83 MB cold** on top of
+the streaming-load fix, for one format version bump and no accuracy change at all.
+
+## E12 — accuracy per byte, tree shape, and the other boosting libraries
+
+Two questions, one run (`experiments/scratch/boost_showdown.py`, same protocol as the
+capacity-price subsection: identical train rows, E1 weights, identical 31,761-row
+held-out raw-coordinate split). **Artifact size is exact arithmetic** — 2 targets × trees
+× (2×leaves−1) nodes × bytes/node — not an estimate, and it was validated against both
+real artifacts to 0.002%.
+
+First, can a different *shape* hold the shipped accuracy in fewer bytes? (v1 byte counts.)
+
+| config | library | `model.bin` | dist MedAPE | dist MAE | dur MedAPE | dur MAE |
+|---|---|---|---|---|---|---|
+| lgbm 63L × 400t, lr .08 † | lightgbm | 2.20 MB | 4.51% | 1,822 m | 4.41% | 114 s |
+| lgbm 255L × 200t, lr .05 | lightgbm | 4.48 MB | 4.82% | 1,965 m | 4.67% | 122 s |
+| lgbm 255L × 400t, lr .08 † | lightgbm | 8.96 MB | 3.15% | 1,322 m | 2.98% | 80 s |
+| lgbm 255L × 400t, lr .05 | lightgbm | 8.96 MB | 3.70% | 1,524 m | 3.51% | 93 s |
+| lgbm 511L × 200t, lr .05 | lightgbm | 8.98 MB | 4.12% | 1,698 m | 3.95% | 104 s |
+| lgbm 255L × 800t, lr .05 | lightgbm | 17.92 MB | 2.85% | 1,210 m | 2.66% | 72 s |
+| **lgbm 511L × 400t, lr .08 (shipped)** | lightgbm | 17.97 MB | **2.62%** | **1,137 m** | **2.42%** | **66 s** |
+| lgbm 1023L × 200t, lr .05 | lightgbm | 18.00 MB | 3.47% | 1,475 m | 3.24% | 88 s |
+
+(† from the capacity-price subsection.)
+
+**The shipped shape is not dominated, and nothing cheaper was found.** At the same ~18 MB
+budget, going deeper-and-narrower (1,023 leaves × 200 trees) costs 32% more error and
+wider-and-shallower at lr 0.05 costs 9% more: shape matters about as much as node count.
+Lowering the learning rate without adding trees simply underfits — 255 leaves at lr .05 is
+3.70% where the same table at lr .08 is 3.15%. The cheap end is worse in both axes than
+configs that already exist: the 4.48 MB point (4.82%) is **dominated** by the 2.20 MB
+63-leaf config (4.51%), and halving the 8.96 MB point costs +1.12 MedAPE points. So the
+generic "tune the hyperparameters near the ceiling" advice is worth about 0.5 points here,
+not a size reduction, and the model stays the memory/accuracy trade the capacity section
+already described.
+
+Second, the library comparison the generic advice asks for:
+
+| arm | library | `model.bin` | dist MedAPE | dist MAE | dur MedAPE | dur MAE |
+|---|---|---|---|---|---|---|
+| **like-for-like** (`grow_policy=lossguide`, `max_leaves=511`, 400t, lr .08) | xgboost | 17.97 MB | 2.81% | 1,268 m | 2.74% | 78 s |
+| same shape, same size, same objective | lightgbm | 17.97 MB | **2.62%** | **1,137 m** | **2.42%** | **66 s** |
+| XGBoost "forgiving defaults" (`depthwise`, `max_depth=6`) | xgboost | 2.20 MB | 4.99% | 2,097 m | 5.18% | 138 s |
+| same size, LightGBM | lightgbm | 2.20 MB | **4.51%** | **1,822 m** | **4.41%** | **114 s** |
+| CatBoost symmetric (`depth=9` ≈ 512 leaves, 400t) | catboost | ~18.00 MB | 5.46% | 2,195 m | 5.66% | 149 s |
+| CatBoost symmetric (`depth=6`) | catboost | 2.20 MB | 6.71% | 2,688 m | 6.89% | 181 s |
+
+**Every generic claim failed to reproduce on this problem.**
+
+1. **"XGBoost has a higher ceiling under deep tuning" — no.** Like-for-like at identical
+   tree shape, objective, weights and size, LightGBM is ahead by 7% relative (2.62% vs
+   2.81%) and 10% on MAE. The ceiling here is set by the eight coordinate features and the
+   smooth-function limitation (Experiments 0/1), not by the booster's regularization.
+2. **"XGBoost's conservative defaults are more forgiving" — no.** Its depth-wise default
+   (63 leaves) scores 4.99% where LightGBM's leaf-wise 63-leaf config scores 4.51% at the
+   same 2.20 MB. Aggressive growth is not the problem when the models are *under*-fitting
+   the short-trip regime, which is the documented state of this model.
+3. **"CatBoost wins on heavy categoricals" — void, and its tree shape is a handicap.**
+   All 8 features are numeric, so the differentiator has nothing to act on. Its symmetric
+   (oblivious) trees then cost 2.1x the error at the same ~18 MB (5.46% vs 2.62%) and 1.5x
+   at 2.20 MB (6.71% vs 4.51%). That is consistent with the capacity finding — this problem
+   is capacity-hungry, and forcing a shared split per level structurally limits capacity.
+   CatBoost's one real attraction, indexing leaves by bitmask instead of walking the tree,
+   is moot: it would save microseconds on a path that is already 94 µs p50, in exchange for
+   doubling the error.
+
+**Verdict: keep LightGBM at 511 leaves × 400 trees × lr 0.08, keep the f32 packed table.**
+A library swap would also have to rebuild the `model.onnx` → `model.bin` export bridge and
+re-prove bit-identity — the interface that already produced the E7 threshold-flooring bug
+— in exchange for a worse model. Note the flip side, which is the useful result: the
+serving format is *not* tied to LightGBM's internals. Only `export_binary.py` knows the
+library, so if a future library did win, the interpreter, the wire format and the golden
+tests would all stay as they are.
 
 
 ## Experiment 0 — oracle snap: is snapping the short-trip bottleneck?

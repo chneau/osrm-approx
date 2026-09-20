@@ -3,29 +3,31 @@ using System.Runtime.InteropServices;
 
 /// <summary>
 /// E11 (see IMPROVEMENTS.md): a tiny, dependency-free interpreter for the
-/// LightGBM tree ensemble, loaded from the compact <c>model.bin</c> emitted by
+/// LightGBM tree ensemble, loaded from <c>model.bin</c> as emitted by
 /// <c>python/export_binary.py</c>. Replaces ONNX Runtime, which was the dominant
-/// RSS cost; the trees and leaf values are bit-identical to the ONNX graph.
+/// RSS cost; the trees and leaf values are identical to the ONNX graph.
 /// </summary>
 /// <remarks>
 /// Binary layout (little-endian), written by <c>python/export_binary.py</c>:
 /// <code>
 ///   magic       char[4]  "OSRT"
-///   version     uint32
+///   version     uint32   2
+///   flags       uint32   bit0 = leaf values are uint16-quantised
 ///   n_features  uint32
 ///   n_targets   uint32
 ///   per target (graph order: distance_m, duration_s):
 ///     base_value    float32
+///     value_scale   float32           decode: (q - 32768) * value_scale
 ///     n_trees       uint32
 ///     n_nodes       uint32
-///     tree_offsets  int32[n_trees+1]   start row of each tree's node block
-///     feature       int32[n_nodes]
+///     tree_offsets  int32[n_trees+1]  start row of each tree's node block
+///     feature       uint8[n_nodes]
 ///     threshold     float32[n_nodes]
-///     left          int32[n_nodes]     global row of the x&lt;=threshold child
-///     right         int32[n_nodes]     global row of the x&gt;threshold child
-///     value         float32[n_nodes]   leaf value (0 for internal nodes)
-///     is_leaf       uint8[n_nodes]
-///     default_left  uint8[n_nodes]
+///     left          int32[n_nodes]    internal: row of the x&lt;=threshold child;
+///                                     leaf: ~row (negative)
+///     right         int32[n_nodes]    internal: row of the x&gt;threshold child
+///     value         float32[n_nodes]  (flags bit0 clear)
+///     value_q       uint16[n_nodes]   (flags bit0 set)
 /// </code>
 /// Child ids are already rebased to global rows, so the walk never needs the
 /// per-tree offset once the (feature, threshold, left, right) row is chosen.
@@ -33,24 +35,30 @@ using System.Runtime.InteropServices;
 /// child (matching ONNX Runtime's TreeEnsembleRegressor semantics).
 /// </remarks>
 /// <remarks>
-/// Loading streams the file rather than reading it whole: each table is read
-/// straight into its final array, so no second, full-size copy of the model is ever
-/// held. See <see cref="Load"/> for why that matters to RSS.
+/// Two deliberate width choices keep both the file and the in-memory tables narrow,
+/// because after the streaming load it is the resident arrays, not the file, that RSS
+/// tracks: features are indices into an 8-wide vector so they are <c>byte</c>, and a
+/// leaf is marked by a negative <c>left</c> instead of a stored flag, so no per-node
+/// flag array exists. <c>Load</c> also streams the file rather than reading it whole,
+/// so no second, full-size copy of the model is ever held.
 /// </remarks>
 internal sealed class TreeEnsembleModel
 {
+    private const int U16Offset = 32768;
     private static readonly byte[] Magic = "OSRT"u8.ToArray();
 
     // Arrays are indexed [target]. Every query walks all targets, so keeping the
     // per-target tables in flat arrays avoids a double indirection per node.
+    // Exactly one of _value / _valueQ is populated, per the file's flags.
     private readonly int[] _nTrees;
     private readonly int[][] _offsets;
-    private readonly int[][] _feature;
+    private readonly byte[][] _feature;
     private readonly float[][] _threshold;
     private readonly int[][] _left;
     private readonly int[][] _right;
     private readonly float[][] _value;
-    private readonly byte[][] _isLeaf;
+    private readonly ushort[][] _valueQ;
+    private readonly float[] _valueScale;
     private readonly float[] _baseValue;
 
     public int FeatureCount { get; }
@@ -60,12 +68,13 @@ internal sealed class TreeEnsembleModel
         int featureCount,
         int[] nTrees,
         int[][] offsets,
-        int[][] feature,
+        byte[][] feature,
         float[][] threshold,
         int[][] left,
         int[][] right,
         float[][] value,
-        byte[][] isLeaf,
+        ushort[][] valueQ,
+        float[] valueScale,
         float[] baseValue)
     {
         FeatureCount = featureCount;
@@ -76,18 +85,18 @@ internal sealed class TreeEnsembleModel
         _left = left;
         _right = right;
         _value = value;
-        _isLeaf = isLeaf;
+        _valueQ = valueQ;
+        _valueScale = valueScale;
         _baseValue = baseValue;
     }
 
     public static TreeEnsembleModel Load(string path)
     {
         // Stream the file instead of File.ReadAllBytes. Reading it whole allocated a
-        // byte[] the size of the entire table (up to ~18 MB), on top of the ~18 MB of
-        // typed node arrays it was then parsed into; being large, that buffer went to
-        // the Large Object Heap and stayed resident until a gen2 collection, so the
-        // model cost ~1.9x its file size in RSS. Each array is now read straight into
-        // its final allocation and the transient copy is never created.
+        // byte[] the size of the entire table, on top of the typed node arrays it was
+        // parsed into; being large, that buffer went to the Large Object Heap and
+        // stayed resident until a gen2 collection, so the model cost ~1.9x its file
+        // size in RSS. Each array is now read straight into its final allocation.
         using var stream = new FileStream(
             path, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: 1 << 16, FileOptions.SequentialScan);
@@ -100,39 +109,51 @@ internal sealed class TreeEnsembleModel
         }
 
         uint version = ReadUInt32(stream, path);
-        if (version != 1)
+        if (version != 2)
         {
-            throw new InvalidDataException($"Unsupported model.bin version {version} (expected 1).");
+            throw new InvalidDataException(
+                $"Unsupported model.bin version {version} (expected 2). " +
+                "Re-run `uv run python/export_binary.py` to recompile the model.");
         }
+
+        uint flags = ReadUInt32(stream, path);
+        bool quantisedValues = (flags & 1) != 0;
 
         int featureCount = (int)ReadUInt32(stream, path);
         int targetCount = (int)ReadUInt32(stream, path);
 
         var nTrees = new int[targetCount];
         var offsets = new int[targetCount][];
-        var feature = new int[targetCount][];
+        var feature = new byte[targetCount][];
         var threshold = new float[targetCount][];
         var left = new int[targetCount][];
         var right = new int[targetCount][];
         var value = new float[targetCount][];
-        var isLeaf = new byte[targetCount][];
+        var valueQ = new ushort[targetCount][];
+        var valueScale = new float[targetCount];
         var baseValue = new float[targetCount];
 
         for (int t = 0; t < targetCount; t++)
         {
             baseValue[t] = ReadSingle(stream, path);
+            valueScale[t] = ReadSingle(stream, path);
             int trees = (int)ReadUInt32(stream, path);
             int nodes = (int)ReadUInt32(stream, path);
             nTrees[t] = trees;
 
             offsets[t] = ReadInt32(stream, path, trees + 1);
-            feature[t] = ReadInt32(stream, path, nodes);
+            feature[t] = ReadBytes(stream, path, nodes);
             threshold[t] = ReadSingle(stream, path, nodes);
             left[t] = ReadInt32(stream, path, nodes);
             right[t] = ReadInt32(stream, path, nodes);
-            value[t] = ReadSingle(stream, path, nodes);
-            isLeaf[t] = ReadBytes(stream, path, nodes);
-            SkipBytes(stream, path, nodes); // default_left: unused (no NaN features)
+            if (quantisedValues)
+            {
+                valueQ[t] = ReadUInt16(stream, path, nodes);
+            }
+            else
+            {
+                value[t] = ReadSingle(stream, path, nodes);
+            }
         }
 
         if (stream.Position != stream.Length)
@@ -142,7 +163,8 @@ internal sealed class TreeEnsembleModel
         }
 
         return new TreeEnsembleModel(
-            featureCount, nTrees, offsets, feature, threshold, left, right, value, isLeaf, baseValue);
+            featureCount, nTrees, offsets, feature, threshold, left, right,
+            value, valueQ, valueScale, baseValue);
     }
 
     /// <summary>
@@ -159,22 +181,38 @@ internal sealed class TreeEnsembleModel
         {
             float accumulator = _baseValue[t];
             int[] offsets = _offsets[t];
-            int[] feat = _feature[t];
+            byte[] feat = _feature[t];
             float[] thr = _threshold[t];
             int[] lo = _left[t];
             int[] hi = _right[t];
-            float[] val = _value[t];
-            byte[] leaf = _isLeaf[t];
             int trees = _nTrees[t];
+            float[] val = _value[t];
+            ushort[] valQ = _valueQ[t];
+            float scale = _valueScale[t];
 
-            for (int k = 0; k < trees; k++)
+            if (val is not null)
             {
-                int i = offsets[k];
-                while (leaf[i] == 0)
+                for (int k = 0; k < trees; k++)
                 {
-                    i = features[feat[i]] <= thr[i] ? lo[i] : hi[i];
+                    int i = offsets[k];
+                    while (lo[i] >= 0)
+                    {
+                        i = features[feat[i]] <= thr[i] ? lo[i] : hi[i];
+                    }
+                    accumulator += val[i];
                 }
-                accumulator += val[i];
+            }
+            else
+            {
+                for (int k = 0; k < trees; k++)
+                {
+                    int i = offsets[k];
+                    while (lo[i] >= 0)
+                    {
+                        i = features[feat[i]] <= thr[i] ? lo[i] : hi[i];
+                    }
+                    accumulator += (valQ[i] - U16Offset) * scale;
+                }
             }
             outputs[t] = accumulator;
         }
@@ -195,18 +233,6 @@ internal sealed class TreeEnsembleModel
                 throw new InvalidDataException($"'{path}' is truncated; the model is incomplete.");
             }
             destination = destination[read..];
-        }
-    }
-
-    /// <summary>Consumes <paramref name="count"/> bytes without allocating an array.</summary>
-    private static void SkipBytes(Stream stream, string path, int count)
-    {
-        Span<byte> scratch = stackalloc byte[256];
-        while (count > 0)
-        {
-            int chunk = Math.Min(count, scratch.Length);
-            ReadExactly(stream, scratch[..chunk], path);
-            count -= chunk;
         }
     }
 
@@ -236,6 +262,13 @@ internal sealed class TreeEnsembleModel
     private static float[] ReadSingle(Stream stream, string path, int count)
     {
         var array = new float[count];
+        ReadExactly(stream, MemoryMarshal.AsBytes(array.AsSpan()), path);
+        return array;
+    }
+
+    private static ushort[] ReadUInt16(Stream stream, string path, int count)
+    {
+        var array = new ushort[count];
         ReadExactly(stream, MemoryMarshal.AsBytes(array.AsSpan()), path);
         return array;
     }

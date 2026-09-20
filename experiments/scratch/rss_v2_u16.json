@@ -1,0 +1,32 @@
+[
+  {
+    "label": "v2-u16-packed",
+    "model": "server/models/model.bin",
+    "artifact_mb": 12.26,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 83.0,
+    "cold_Pss_mb": 58.6,
+    "Pss_mb": 77.6,
+    "Rss_mb": 102.8,
+    "Private_Dirty_mb": 51.3,
+    "Anonymous_mb": 38.5,
+    "VmRSS_mb": 100.4,
+    "VmHWM_mb": 100.4
+  },
+  {
+    "label": "v2-u16-packed",
+    "model": "server/models/model.bin",
+    "artifact_mb": 12.26,
+    "loaded": "model.bin",
+    "warm_requests_ok": 3000,
+    "cold_Rss_mb": 82.4,
+    "cold_Pss_mb": 57.9,
+    "Pss_mb": 76.9,
+    "Rss_mb": 102.3,
+    "Private_Dirty_mb": 50.5,
+    "Anonymous_mb": 38.0,
+    "VmRSS_mb": 100.0,
+    "VmHWM_mb": 100.0
+  }
+]

@@ -136,7 +136,7 @@ the HTTP client's own overhead dominating the number.
 ├── server/                         # .NET 10 minimal API
 │   ├── RoutingService.csproj
 │   ├── Program.cs
-│   ├── TreeEnsembleModel.cs        # E11: dependency-free tree interpreter (streams model.bin)
+│   ├── TreeEnsembleModel.cs        # E11/E11b: dependency-free interpreter, streams packed model.bin
 │   └── models/
 │       ├── model.onnx              # baked LightGBM ensemble (511 leaves, ONNX-verified)
 │       ├── model.bin               # compiled tree tables served at runtime (E11)
@@ -264,24 +264,24 @@ random pairs.
 
 Both services were warmed with 200 synthetic `A → B` requests, then sampled from
 `/proc/<pid>/smaps_rollup` at steady state (three identical readings, OSRM read inside its
-container). The approximation column was re-measured after the E11 memory fix below; *cold*
+container). The approximation column was re-measured after the memory fixes below; *cold*
 is sampled immediately after model load, before any request, and the OSRM column is the
 original head-to-head (it could not be re-read from outside its container):
 
 | metric | OSRM (`osrm-routed`) | Approx service (warm) | Approx service (cold) |
 |--------|----------------------|-----------------------|-----------------------|
-| **Pss** (shared-page adjusted) | **574 MB** | **83 MB** | 63 MB |
-| RSS | 575 MB | 108 MB | 87 MB |
-| anonymous heap (`Private_Dirty`) | 552 MB | 57 MB | — |
-| peak high-water (`VmHWM`) | 710 MB | 106 MB | — |
+| **Pss** (shared-page adjusted) | **574 MB** | **79 MB** | 59 MB |
+| RSS | 575 MB | 104 MB | 83 MB |
+| anonymous heap (`Private_Dirty`) | 552 MB | 53 MB | — |
+| peak high-water (`VmHWM`) | 710 MB | 102 MB | — |
 | cgroup usage (container) | 558 MB | — (not containerised) | — |
-| on-disk artifact | 208 MB (`.osrm*` MLD graph) | 18 MB (`model.bin`) | 18 MB |
+| on-disk artifact | 208 MB (`.osrm*` MLD graph) | 14 MB (`model.bin`) | 14 MB |
 | threads | 18 | 16 | 16 |
 
-The approximation therefore sits **~491 MB below OSRM by Pss (~86% lower; 6.9× ratio)** and
-~81% lower by RSS — the opposite of what the plan assumed. OSRM's anonymous heap balloons under the
-208 MB MLD graph (552 MB anon); the approximation's 57 MB anon heap is now dominated by fixed
-.NET/ASP.NET Core host overhead on top of an 18 MB tree table. One caveat on the ratio: OSRM's
+The approximation therefore sits **~495 MB below OSRM by Pss (~86% lower; 7.3× ratio)** and
+~82% lower by RSS — the opposite of what the plan assumed. OSRM's anonymous heap balloons under the
+208 MB MLD graph (552 MB anon); the approximation's 53 MB anon heap is now dominated by fixed
+.NET/ASP.NET Core host overhead on top of a 14 MB tree table. One caveat on the ratio: OSRM's
 footprint depends on its state (its `VmRSS` reads ~303 MB when idle in this session, against 575 MB
 under the `wrk` load above), and only the loaded figure is comparable to a warmed service.
 
@@ -301,18 +301,23 @@ full-size copy of the table on the Large Object Heap on top of the ~18 MB of par
 That copy is now gone: the loader streams each array straight into its final allocation, and an A/B
 on the same box drops the 511-leaf model's cost from **1.92× to 1.00×** its artifact size (cold RSS
 104.5 → 87.0 MB) and warm RSS under load from **123 → 108 MB** — with predictions bit-identical
-over 400 routes and all 38 tests passing. Readings are stable to <0.5 MB across runs, so this is a
-footprint, not a leak. Approaching single-digit MB would still require a non-.NET host; that
+over 400 routes and all 38 tests passing. The table itself then narrowed from 22 to 17 bytes per
+node (uint8 feature indices, leaf flag folded into the sign of the child index — see
+`IMPROVEMENTS.md` E11b), taking `model.bin` from 17.97 to **13.89 MB** and a further **4 MB** off
+RSS to the 104 MB above, still bit-identical. Readings are stable to <0.5 MB across runs, so this
+is a footprint, not a leak. Approaching single-digit MB would still require a non-.NET host; that
 trade-off remains out of scope. The serving *compute* target (p99 < 1 ms, zero graph traversal) is
 met; the *footprint* target is not.
 
 The 511-leaf capacity (E7) is what made the ONNX-era footprint heavy — loading the 63-leaf
 `model.onnx` (3.8 MB) into the ONNX server gave **~138 MB RSS**, the 511-leaf one (32.4 MB) gave
 **~400 MB**. E11 broke most of that coupling and the streaming load finished the job: the tree table
-is read once into flat arrays and now costs **~1.0× its own file size** (~18 MB for the shipped
+is read once into flat arrays and now costs **~1.0× its own file size** (~14 MB for the shipped
 model), down from the ~1.9× it cost between E11 and the loader fix. The saving scales with the
 model, so it is ~17 MB here and only ~3 MB for the old 2.2 MB 63-leaf table — capacity is no longer
-an expensive lever for memory.
+an expensive lever for memory. A cross-library test confirmed the shape is already on the Pareto
+front: at the same ~18 MB, XGBoost scores 7% worse and CatBoost 2× worse, and no cheaper LightGBM
+configuration holds the current accuracy (`IMPROVEMENTS.md` E12).
 
 ---
 
