@@ -353,3 +353,56 @@ specifically an exact on-network oracle and the road graph can be imported direc
 The reusable positive result: `experiments/pll.c` builds correct hub labels for an
 11.7k-node graph in ~4 s and answers queries in microseconds, so the *oracle* half of S2
 is de-risked if a real road graph ever becomes available.
+
+---
+
+## Appendix C — "can we just use a simplified OSM?"
+
+Prototype: `experiments/try_osm_graph.py` (a PEP-723 `uv` script). It builds the **real
+OSM driving network** with `pyrosm` (no OSRM, no training), weights each segment by
+great-circle length and a `maxspeed`-derived duration, snaps raw query coordinates to the
+nearest graph node, and runs shortest paths. This is an independent routing graph built
+from the exact same OSM extract OSRM used.
+
+- Full driving network: **438,191-node largest component**, 860,764 directed edges, built
+  in **~4 s**.
+- "Simplified" = keep only motorway/trunk/primary/secondary/tertiary (drop residential,
+  unclassified, service).
+
+### Results (same `offnetwork` / `offnetwork_short` raw-coordinate splits)
+
+| graph | split | distance MedAPE | duration MedAPE | distance bias | routable |
+|---|---|---|---|---|---|
+| full OSM driving | offnetwork | 11.0% | 24.0% | 0.90× | 90.5% |
+| full OSM driving | offnetwork_short | 6.2% | 30.6% | 0.98× | 95.8% |
+| **major roads only** | offnetwork_short | **29.6%** | **52.4%** | 0.86× | 94.8% |
+| major roads, `< 1 km` | offnetwork_short | **58.8%** | 53.5% | — | — |
+
+Compare the learned model on the same task: **2.6% / 2.4%**; S1: 3.4% / 5.0%.
+
+### Why it loses
+
+1. **No turn restrictions.** The node-based OSM graph permits turns OSRM forbids, so it
+   finds *shorter* paths than OSRM (median distance ratio **0.90×**) — not just noisy, but
+   systematically optimistic.
+2. **Different speed profile.** Segment speeds from `maxspeed`/road-class defaults give
+   durations ~25–30% short (ratio **0.70–0.76×**); OSRM also adds turn costs and its own
+   penalty model.
+3. **Unreachable pairs.** 4–10% of raw-coordinate pairs return no route even after keeping
+   the largest component (one-way/isolated-fragment/snap effects).
+4. **Simplification is exactly what breaks short trips.** Dropping residential roads
+   raises `< 1 km` distance error from 13% to **59%** and duration to 54% — the local
+   network *is* the short-trip signal.
+
+### Verdict — rejected
+
+A simplified OSM graph is trivially buildable and pleasantly fast, but it is a **different
+router**, not an OSRM approximation. To close the gap you must add turn restrictions,
+match OSRM's access filtering, speed and turn-penalty profile, and snap to edges the way
+OSRM does — that is reimplementing OSRM. The learned tree ensemble wins at this specific
+task because it was trained on OSRM's *outputs*, so it distilled OSRM's snapping, turn
+rules and speeds implicitly; a from-scratch graph has to rediscover them explicitly.
+
+If the goal changes from "mimic OSRM" to "a decent independent router," the full OSM graph
+is a reasonable starting point — but at that point just run OSRM, which is already that
+router and is exact by definition.
